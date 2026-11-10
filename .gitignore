@@ -8,5 +8,8 @@ dist/
 wheels/
 *.egg-info
 
+documentation/*subject.pdf
+
 # Virtual environments
 .venv
+
