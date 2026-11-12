@@ -8,8 +8,10 @@ dist/
 wheels/
 *.egg-info
 
+
 # Virtual environments
 .venv
 
+documentation/*subject.pdf
 moulinette/
 .antigravity/
