@@ -1,0 +1,4 @@
+# Ce dossier contiendra les fichiers solution.json officiels sauvegardés
+# lors des campagnes de benchmark (5 modèles x 3 tâches SWE-bench),
+# servant de preuves documentées pour le rapport BENCHMARK_REPORT.md.
+

@@ -1,0 +1,4 @@
+# Ce dossier stocke les sorties brutes et logs générés lors des exécutions
+# de la moulinette d'évaluation (./evaluations/EVAL_TYPE/YYYY-MM-DD_HH-MM-SS/...).
+# Il sert de répertoire de travail local pour le débogage.
+
