@@ -1,616 +1,347 @@
-# Cartes Trello — Agent Smith (Format Prêt à l'Emploi)
+# Cartes Trello — Agent Smith (Version Consolidée STRUCTURE.md)
 
-Format de chaque carte :
-- **Titre** : Court, actionnable, copié tel quel dans Trello.
-- **Description** : Ce qu'il faut coder, dans quel fichier, avec quelles classes/méthodes.
-- **Critères d'acceptation** : Liste de vérifications binaires (✅ ou ❌), testables immédiatement.
+Ce document fournit les **cartes Trello prêtes à l'emploi**, découpées selon la chronologie **MBPP First** en **4 Jalons (Sprints)** et strictement alignées sur l'arborescence de `STRUCTURE.md` et `ARCHITECTURE_SPEC.md`.
+
+---
+
+## 🎯 OBJECTIFS ET CRITÈRES GLOBAUX D'EXAMEN
+- **MBPP** : 4/5 tâches réussies (*10 itérations max, 120s, 6k in, 1.5k out*).
+- **SWE-bench** : 2/3 tâches réussies (*30 itérations max, 900s, 300k in, 10k out*).
+- **Sandbox** : 100 % de réussite sur `exam_sandbox.sh`.
 
 ---
 
 # 🟡 SPRINT 1 — MVP MBPP
-> Fin de sprint : `uv run python -m agent_mbpp` résout une tâche MBPP et produit un `solution.json` valide.
+> **Objectif du jalon** : `uv run python -m agent_mbpp` résout une première tâche algorithmique MBPP et produit un `solution.json` validé par la moulinette.
+> **Point de convergence** : Dès le Jour 2 ou 3, les deux développeurs testent un run bout-en-bout.
 
 ---
 
-## [S1-DEV1-01] SandboxRunner : Exécution Isolée & final_answer
-
-**Label** : `Dev 1` · `Sprint 1` · `Sandbox`
-
-**Description**
-Implémenter l'exécuteur de code Python en sous-processus isolé.
-Fichier cible : `src/sandbox/runner.py`
-
-Classes à créer :
-
-**`FinalAnswerSignal(Exception)`**
-- Attribut `answer: str`
-- Levée depuis le callable injecté `final_answer()`
-
-**`ExecutionResult`**
-- Champs : `stdout: str`, `stderr: str`, `exit_code: int`, `final_answer: Optional[str]`, `is_timeout: bool`, `is_truncated: bool`
-
-**`SandboxRunner`**
-- `__init__(config: SandboxConfig, tools_namespace: dict)` : stocke la config et le namespace des outils
-- `execute(code: str) -> ExecutionResult` : exécute dans un sous-processus séparé, redirige stdout/stderr, injecte `final_answer()` dans les globals
-- `_truncate_output(text: str, max_chars: int = 4000) -> tuple[str, bool]` : tronque avec note explicite si dépassement
-
-**Critères d'acceptation**
-- [ ] Le code `final_answer("bonjour")` retourne `ExecutionResult.final_answer == "bonjour"`
-- [ ] La sortie `print("hello")` est capturée dans `ExecutionResult.stdout`
-- [ ] Une exception Python dans le code retourne `ExecutionResult.exit_code != 0` et le traceback dans `stderr`
-- [ ] `KeyboardInterrupt` et `SystemExit` ne sont pas interceptés silencieusement
-- [ ] Une sortie de plus de 4000 caractères est tronquée avec la mention `[TRUNCATED]`
+### [S1-DEV1-01] SandboxRunner Minimal & final_answer
+- **Développeur** : Dev 1
+- **Fichier** : `src/sandbox/core.py`
+- **Description** :
+  Implémenter l'exécuteur de code Python dans un sous-processus isolé avec capture des flux I/O et construct de terminaison.
+  - Définir `class FinalAnswerSignal(Exception)` avec l'attribut `answer: str`.
+  - Définir `class ExecutionResult` avec champs : `stdout`, `stderr`, `exit_code`, `final_answer`, `is_timeout`, `is_truncated`.
+  - Définir `class SandboxRunner.__init__(config: SandboxConfig, tools_namespace: dict)`.
+  - Implémenter `SandboxRunner.execute(code: str) -> ExecutionResult` : exécution isolée, injection du callable `final_answer(answer_str)` qui lève `FinalAnswerSignal`.
+  - Implémenter `SandboxRunner._truncate_output(text: str, max_chars: int = 4000) -> tuple[str, bool]`.
+- **Critères d'acceptation** :
+  - [ ] Le code `final_answer("42")` retourne `ExecutionResult.final_answer == "42"`.
+  - [ ] Les appels `print("hello")` sont capturés dans `ExecutionResult.stdout`.
+  - [ ] Une exception Python non gérée retourne `exit_code != 0` et le traceback dans `stderr`.
+  - [ ] `KeyboardInterrupt` et `SystemExit` ne sont pas étouffés silencieusement.
+  - [ ] Une sortie de plus de 4000 caractères est tronquée avec la mention `[TRUNCATED]`.
 
 ---
 
-## [S1-DEV1-02] MBPPToolKit & Serveur MCP stdio
-
-**Label** : `Dev 1` · `Sprint 1` · `MCP`
-
-**Description**
-Coder l'unique outil MBPP et l'exposer via un serveur MCP en mode stdio.
-Fichiers cibles : `src/tools/mbpp.py`, `mcp_tools_mbpp.py`
-
-**`MBPPToolKit`** dans `src/tools/mbpp.py`
-- `__init__()`
-- `run_tests(code: str, test_list: list[str]) -> str` : exécute les assertions Python et retourne `'{"success": true/false, "output": "..."}'`
-
-**`MBPPMCPServer`** dans `mcp_tools_mbpp.py`
-- `__init__(toolkit: Optional[MBPPToolKit] = None)`
-- `register_tools() -> None` : enregistre `run_tests` sur le serveur MCP
-- `run(transport: str = "stdio") -> None` : démarre l'écoute
-- `@classmethod main() -> None` : parse les arguments et lance le serveur
-
-**Critères d'acceptation**
-- [ ] `MBPPToolKit().run_tests("def f(x): return x+1", ["assert f(1)==2"])` retourne `'{"success": true, "output": ""}'`
-- [ ] `MBPPToolKit().run_tests("def f(x): return x", ["assert f(1)==2"])` retourne `'{"success": false, "output": "AssertionError..."}'`
-- [ ] `python mcp_tools_mbpp.py` démarre sans erreur
-- [ ] Le serveur répond correctement à une requête `tools/list` via le protocole MCP
+### [S1-DEV1-02] MBPPToolKit & Serveur MCP stdio
+- **Développeur** : Dev 1
+- **Fichiers** : `src/tools/mbpp_tools.py`, `mcp_tools_mbpp.py`
+- **Description** :
+  Créer l'outil MBPP et l'exposer via le protocole MCP en mode stdio à la racine du dépôt (*Section V.2.4*).
+  - Dans `src/tools/mbpp_tools.py` : `class MBPPToolKit.run_tests(code: str, test_list: list[str]) -> str` évaluant les assertions et retournant `{"success": bool, "output": str}`.
+  - Dans `mcp_tools_mbpp.py` : `class MBPPMCPServer` avec méthodes `register_tools()`, `run(transport="stdio")` et `@classmethod main()`.
+- **Critères d'acceptation** :
+  - [ ] `MBPPToolKit().run_tests("def add(a, b): return a + b", ["assert add(1, 2) == 3"])` retourne `{"success": true, "output": ""}`.
+  - [ ] Une assertion fausse retourne `{"success": false, "output": "AssertionError..."}`.
+  - [ ] `python mcp_tools_mbpp.py` démarre sans erreur en mode stdio.
+  - [ ] Le serveur MCP répond correctement à une requête `tools/list` listant `run_tests`.
 
 ---
 
-## [S1-DEV1-03] MCPClient stdio & Injection dans Sandbox
-
-**Label** : `Dev 1` · `Sprint 1` · `MCP`
-
-**Description**
-Connecter la sandbox au serveur MCP MBPP et exposer ses outils comme fonctions Python.
-Fichiers cibles : `src/mcp/client.py`, `src/mcp/tools.py`
-
-**`MCPToolDefinition(BaseModel)`** dans `src/mcp/client.py`
-- Champs : `name: str`, `description: str`, `parameters: dict`
-
-**`MCPClient`** dans `src/mcp/client.py`
-- `__init__()`
-- `async connect_stdio(command: str) -> None` : lance le sous-processus et établit la session MCP
-- `async list_tools() -> list[MCPToolDefinition]`
-- `async call_tool(name: str, arguments: dict) -> Any`
-- `async close() -> None`
-
-**`MCPToolManager`** dans `src/mcp/tools.py`
-- `__init__(client: MCPClient)`
-- `async create_tool_callables() -> dict[str, Callable]` : génère des fonctions Python appelables depuis la sandbox, chacune faisant un `await client.call_tool(...)` sous le capot
-
-**Critères d'acceptation**
-- [ ] Le client se connecte au serveur MCP MBPP en stdio sans erreur
-- [ ] `list_tools()` retourne la définition de l'outil `run_tests`
-- [ ] `call_tool("run_tests", {"code": "...", "test_list": [...]})` retourne le résultat JSON attendu
-- [ ] La fonction Python générée `run_tests(code, test_list)` fonctionne dans le namespace de la sandbox
+### [S1-DEV1-03] Client MCP stdio & Bridge Python
+- **Développeur** : Dev 1
+- **Fichiers** : `src/mcp/client.py`, `src/mcp/bridge.py`
+- **Description** :
+  Connecter la sandbox au serveur MCP local et transformer l'outil distant en fonction Python appelable.
+  - Dans `src/mcp/client.py` : `class MCPClient` avec `connect_stdio(command: str)`, `list_tools()`, `call_tool(name, args)`, `close()`.
+  - Dans `src/mcp/bridge.py` : `class MCPToolBridge.__init__(client: MCPClient)` avec `create_tool_callables() -> dict[str, Callable]`.
+- **Critères d'acceptation** :
+  - [ ] `MCPClient.connect_stdio("python mcp_tools_mbpp.py")` s'exécute sans erreur.
+  - [ ] `list_tools()` retourne la définition de `run_tests`.
+  - [ ] La fonction Python retournée par `MCPToolBridge` s'exécute de façon transparente à l'intérieur de `SandboxRunner`.
 
 ---
 
-## [S1-DEV2-01] Modèles Pydantic : Tâches, Métriques & Config Sandbox
-
-**Label** : `Dev 2` · `Sprint 1` · `Modèles`
-
-**Description**
-Définir tous les modèles de données validés par la moulinette.
-Fichiers cibles : `src/models/tasks.py`, `src/models/metrics.py`, `src/models/sandbox.py`
-
-**`MBPPTaskInput(BaseModel)`** dans `src/models/tasks.py`
-- Champs : `task_id: int`, `task_definition: str`, `function_definition: str`, `test_imports: list[str]`, `test_list: list[str]`
-
-**`StepMetrics(BaseModel)`** dans `src/models/metrics.py`
-- Champs obligatoires (Section V.1.1) : `step`, `input_tokens`, `output_tokens`, `request_time_ms`, `timestamp`, `api_url`, `model_name`, `llm_output`, `sandbox_input`, `sandbox_output`, `retries`
-
-**`SolutionOutput(BaseModel)`** dans `src/models/metrics.py`
-- Champs : `task_id`, `benchmark`, `success`, `solution`, `iterations`, `total_requests`, `total_input_tokens`, `total_output_tokens`, `total_time_seconds`, `steps`, `system_prompt`, `error`, `timestamp`
-- `record_step(step: StepMetrics) -> None` : incrémente `total_input_tokens`, `total_output_tokens`, `total_requests`
-- `to_file(path: Path) -> None` : sauvegarde en JSON indenté
-
-**`SandboxConfig(BaseModel)`** dans `src/models/sandbox.py`
-- Champs : `authorized_imports: list[str]`, `allowed_directories: list[str]`, `max_execution_time_seconds: int = 30`, `max_memory_mb: int = 512`
-- `is_import_authorized(module_name: str) -> bool` : accepte `math` si `"math"` ou `"math.*"` est dans la liste
-- `is_path_authorized(path: str | Path) -> bool` : compare le chemin canonique `os.path.realpath(path)` aux répertoires autorisés
-- `@classmethod from_json_file(path: Path) -> "SandboxConfig"`
-
-**Critères d'acceptation**
-- [ ] `SandboxConfig(...).is_import_authorized("collections.abc")` retourne `True` si `"collections.*"` est dans la liste
-- [ ] `SandboxConfig(...).is_import_authorized("os")` retourne `False`
-- [ ] `SolutionOutput(...).to_file("solution.json")` crée un fichier JSON valide contenant tous les champs requis
-- [ ] `MBPPTaskInput.model_validate(json.loads(task_file_content))` parse sans erreur le fichier de tâche de la moulinette
+### [S1-DEV2-01] Modèles Pydantic : Tasks, Metrics & Config
+- **Développeur** : Dev 2
+- **Fichiers** : `src/models/config.py`, `src/models/tasks.py`, `src/models/metrics.py`
+- **Description** :
+  Définir les contrats de données Pydantic v2 imposés par le sujet et la moulinette (*Section V.1.1*).
+  - `class SandboxConfig(BaseModel)` dans `src/models/config.py` : avec `is_import_authorized(module_name)` (gestion du wildcard `.*`), `is_path_authorized(path)` (`realpath`), et `from_json_file(path)`.
+  - `class MBPPTaskInput(BaseModel)` dans `src/models/tasks.py` : `task_id`, `task_definition`, `function_definition`, `test_imports`, `test_list`.
+  - `class StepMetrics(BaseModel)` et `class SolutionOutput(BaseModel)` dans `src/models/metrics.py` : avec méthodes `record_step(step)` et `to_file(path)`.
+- **Critères d'acceptation** :
+  - [ ] `SandboxConfig(...).is_import_authorized("collections.abc")` retourne `True` si `"collections.*"` est configuré.
+  - [ ] `SandboxConfig(...).is_import_authorized("os")` retourne `False`.
+  - [ ] `MBPPTaskInput.model_validate(json_data)` parse sans erreur les fichiers de tâches de la moulinette.
+  - [ ] `SolutionOutput(...).to_file("solution.json")` génère un JSON valide avec tous les champs requis.
 
 ---
 
-## [S1-DEV2-02] Client LLM OpenAI-Compatible & Extraction Markdown
-
-**Label** : `Dev 2` · `Sprint 1` · `LLM`
-
-**Description**
-Appeler un premier modèle LLM et extraire le code Python de sa réponse.
-Fichiers cibles : `src/llm/base.py`, `src/llm/openai_compatible.py`, `src/core/extraction.py`
-
-**`LLMResponse(BaseModel)`** dans `src/llm/base.py`
-- Champs : `text: str`, `input_tokens: int`, `output_tokens: int`, `latency_ms: float`, `model_name: str`, `api_url: str`
-
-**`BaseLLMClient(ABC)`** dans `src/llm/base.py`
-- `__init__(model_name: str, base_url: str, api_key: str)`
-- `@abstractmethod async generate(messages: list[dict], stop_sequences: Optional[list[str]] = None) -> LLMResponse`
-
-**`OpenAICompatibleClient(BaseLLMClient)`** dans `src/llm/openai_compatible.py`
-- `async generate(...)` : POST sur `{base_url}/chat/completions`, mesure `latency_ms`, extrait `usage.prompt_tokens` et `usage.completion_tokens`
-
-**`CodeExtractionResult(BaseModel)`** dans `src/core/extraction.py`
-- Champs : `code: str`, `was_malformed: bool`, `format_detected: str`, `explanation: str`
-
-**`CodeExtractor`** dans `src/core/extraction.py`
-- `extract(response_text: str) -> CodeExtractionResult`
-- `_extract_python_block(text: str) -> Optional[CodeExtractionResult]` : blocs ` ```python ... ``` ` ou ` ``` ... <end_code> `
-
-**Critères d'acceptation**
-- [ ] `OpenAICompatibleClient` fait une requête réelle à Groq ou OpenRouter et retourne une `LLMResponse`
-- [ ] `LLMResponse.input_tokens > 0` et `LLMResponse.latency_ms > 0`
-- [ ] `CodeExtractor().extract("```python\nprint('hello')\n```")` retourne un `CodeExtractionResult.code == "print('hello')"`
-- [ ] Un texte sans bloc de code retourne `was_malformed == True`
+### [S1-DEV2-02] Client LLM OpenAI-Compatible & Extraction Markdown
+- **Développeur** : Dev 2
+- **Fichiers** : `src/llm/base.py`, `src/llm/openai_compatible.py`, `src/core/extraction.py`
+- **Description** :
+  Effectuer des requêtes aux modèles gratuits (Groq, OpenRouter) et extraire le code Python généré.
+  - `class LLMResponse(BaseModel)` et `class BaseLLMClient(ABC)` dans `src/llm/base.py`.
+  - `class OpenAICompatibleClient(BaseLLMClient)` dans `src/llm/openai_compatible.py` : appel HTTP sur `{base_url}/chat/completions` avec `stop_sequences`, calcul de `latency_ms` et des tokens.
+  - `class CodeExtractor` dans `src/core/extraction.py` avec extraction des blocs Markdown ````python ... ````.
+- **Critères d'acceptation** :
+  - [ ] Une requête réelle sur Groq ou OpenRouter retourne une `LLMResponse` valide.
+  - [ ] `LLMResponse.input_tokens > 0` et `LLMResponse.latency_ms > 0`.
+  - [ ] `CodeExtractor.extract("```python\nprint(1)\n```")` extrait le code `print(1)`.
+  - [ ] L'absence de bloc de code signale `was_malformed = True`.
 
 ---
 
-## [S1-DEV2-03] AgentLoop MBPP & CLI agent_mbpp
-
-**Label** : `Dev 2` · `Sprint 1` · `Agent`
-
-**Description**
-Assembler la boucle de raisonnement *Thought → Code → Observation* et créer le script d'évaluation.
-Fichiers cibles : `src/core/prompt.py`, `src/core/loop.py`, `agent_mbpp.py`
-
-**`PromptManager`** dans `src/core/prompt.py`
-- `__init__(base_instructions: str)`
-- `build_system_prompt(tool_manual: str) -> str` : assemble les instructions + manuel d'outils + règle `final_answer`
-- `format_observation(stdout: str, stderr: str, is_timeout: bool = False, truncated: bool = False) -> str`
-
-**`AgentLoop`** dans `src/core/loop.py`
-- `__init__(llm_router, sandbox_runner, prompt_manager, extractor, max_iterations, max_input_tokens, max_output_tokens, timeout_seconds)`
-- `run(task_id: str, benchmark: str, user_prompt: str, tool_manual: str) -> SolutionOutput`
-- `_enforce_hard_limits(iteration, cumulative_in, cumulative_out, elapsed) -> None` : lève une exception si dépassement
-
-**`MBPPAgentApp`** dans `agent_mbpp.py`
-- `__init__(args=None)` : parse `--task-file`, `--output`, `--model-name`, `--provider-url`, `--max-iterations`
-- `load_task() -> MBPPTaskInput`
-- `bootstrap_environment() -> tuple[SandboxRunner, LLMRouter]`
-- `execute() -> SolutionOutput`
-- `save_solution(solution: SolutionOutput) -> None`
-- `@classmethod main() -> None`
-
-**Critères d'acceptation**
-- [ ] `uv run python -m agent_mbpp --task-file task.json --output solution.json --model-name <model> --provider-url <url>` s'exécute sans erreur
-- [ ] Le `solution.json` produit contient `success`, `steps`, `total_input_tokens`, `system_prompt`
-- [ ] L'agent s'arrête dès que `final_answer()` est appelée (pas forcément à l'itération max)
-- [ ] En cas d'erreur LLM, le script ne crashe pas et écrit `solution.json` avec `success: false` et le message d'erreur
+### [S1-DEV2-03] AgentLoop MBPP & CLI agent_mbpp
+- **Développeur** : Dev 2
+- **Fichiers** : `src/core/prompt.py`, `src/core/loop.py`, `src/agent/mbpp_agent.py`, `agent_mbpp.py`
+- **Description** :
+  Assembler le cycle *Thought → Code → Observation*, l'orchestrateur `MBPPAgent` et le point d'entrée racine.
+  - `class PromptManager` dans `src/core/prompt.py` : `build_system_prompt()` et `format_observation()`.
+  - `class AgentLoop` dans `src/core/loop.py` : boucle autonome ReAct, limitation d'itérations, capture de `final_answer`.
+  - `class MBPPAgent` dans `src/agent/mbpp_agent.py` : chargement tâche, instanciation loop, sauvegarde `solution.json`.
+  - `class MBPPAgentApp` dans `agent_mbpp.py` : parsing CLI pour `uv run python -m agent_mbpp`.
+- **Critères d'acceptation** :
+  - [ ] `uv run python -m agent_mbpp --task-file task.json --output solution.json --model-name <name> --provider-url <url>` s'exécute de bout en bout.
+  - [ ] Le fichier `solution.json` produit est validé avec succès par `uv run moulinette_eval validate mbpp task.json solution.json`.
 
 ---
 
-# 🟠 SPRINT 2 — Sécurité, Robustesse & 4/5 MBPP
-> Fin de sprint : `exam_sandbox.sh` passe à 100 %. L'agent tient 4/5 sur MBPP malgré les plafonds et le rate-limiting.
+# 🟠 SPRINT 2 — Sécurité Sandbox, Robustesse & 4/5 MBPP
+> **Objectif du jalon** : 100 % de réussite à `exam_sandbox.sh`. L'agent résout au moins 4/5 tâches MBPP sans crash d'API ni dépassement de quotas.
 
 ---
 
-## [S2-DEV1-01] SecurityEnforcer : Verrous Sandbox Pure Stdlib
-
-**Label** : `Dev 1` · `Sprint 2` · `Sécurité`
-
-**Description**
-Neutraliser tous les vecteurs d'attaque dans la sandbox sans aucune dépendance externe.
-Fichier cible : `src/sandbox/security.py`
-
-**`SecurityEnforcer`**
-- `__init__(config: SandboxConfig)`
-- `install_import_hook() -> None` : insère un finder custom dans `sys.meta_path` qui appelle `config.is_import_authorized()` et lève `ImportError` si refus
-- `sanitize_builtins() -> dict` : construit un dict de builtins sans `eval`, `exec`, `breakpoint`, `compile`, `__import__`; surcharge `open` pour vérifier `config.is_path_authorized()`
-- `disable_network() -> None` : remplace `socket.socket.__init__` par une méthode levant `PermissionError("Network access is disabled")`
-- `set_resource_limits() -> None` : appelle `resource.setrlimit(resource.RLIMIT_AS, (max_bytes, max_bytes))`
-- `apply_all_guards() -> dict` : appelle les 4 méthodes ci-dessus et retourne le namespace assaini prêt à être injecté dans `SandboxRunner`
-
-**Critères d'acceptation**
-- [ ] `exec("import os")` dans le namespace assaini lève `ImportError`
-- [ ] `exec("import math")` dans le namespace assaini réussit si `math` est dans l'allowlist
-- [ ] `exec("open('/etc/passwd')")` lève une erreur si `/etc` n'est pas dans `allowed_directories`
-- [ ] `exec("import socket; socket.socket()")` lève `PermissionError`
-- [ ] `exec("eval('1+1')")` lève `NameError` (eval supprimé des builtins)
-- [ ] Tous les tests de `exam_sandbox.sh` passent
+### [S2-DEV1-01] Sécurité Sandbox Découpée (Pure Stdlib)
+- **Développeur** : Dev 1
+- **Fichiers** : `src/sandbox/security.py`, `src/sandbox/builtins_guard.py`, `src/sandbox/fs_guard.py`, `src/sandbox/limits.py`
+- **Description** :
+  Implémenter les 4 verrous d'isolation stricts sans aucune bibliothèque externe (pas de `RestrictedPython`).
+  - Dans `src/sandbox/security.py` : `class ASTSecurityAnalyzer` rejetant via `ast.parse` les imports interdits et les accès aux attributs magiques (`__subclasses__`, etc.).
+  - Dans `src/sandbox/builtins_guard.py` : `class BuiltinsGuard` assainissant le dictionnaire `__builtins__` (suppression `eval`, `exec`, `compile`).
+  - Dans `src/sandbox/fs_guard.py` : `class FileSystemGuard` avec `safe_open()` restreignant les ouvertures de fichiers aux `allowed_directories`.
+  - Dans `src/sandbox/limits.py` : `class ResourceLimits` neutralisant `socket.socket` (`PermissionError`) et appliquant les quotas RAM (`resource.setrlimit`).
+- **Critères d'acceptation** :
+  - [ ] `exec("import os")` est bloqué par l'analyseur AST.
+  - [ ] `exec("open('/etc/shadow')")` lève `SandboxSecurityError`.
+  - [ ] `exec("import socket; socket.socket()")` lève `PermissionError`.
+  - [ ] `exec("eval('1+1')")` lève `NameError`.
+  - [ ] Les tests d'isolation de `exam_sandbox.sh` passent avec succès.
 
 ---
 
-## [S2-DEV1-02] Timeout 30s & Troncature des Sorties
-
-**Label** : `Dev 1` · `Sprint 2` · `Sandbox`
-
-**Description**
-Terminer de force le code bouclant à l'infini et éviter de saturer le contexte LLM avec de longues sorties.
-Fichier cible : `src/sandbox/runner.py` (enrichissement)
-
-Modifier `SandboxRunner.execute()` pour :
-- Lancer le code dans un `multiprocessing.Process` avec `timeout=config.max_execution_time_seconds`
-- Appeler `process.terminate()` puis `process.kill()` si le processus ne s'arrête pas
-- Renseigner `ExecutionResult.is_timeout = True` en cas de dépassement
-- Appeler `_truncate_output()` sur `stdout` et `stderr` avant de retourner le résultat
-
-**Critères d'acceptation**
-- [ ] `runner.execute("while True: pass")` retourne après ≤ 32 secondes
-- [ ] `ExecutionResult.is_timeout == True` pour le code bouclant
-- [ ] Un code qui génère 10 000 lignes de sortie retourne `is_truncated == True` et `stdout` tronqué à ~4000 caractères avec la mention `[OUTPUT TRUNCATED]` à la fin
-- [ ] Un code qui s'arrête normalement en 1 seconde retourne `is_timeout == False`
+### [S2-DEV1-02] Timeout Process & Manuel Dynamique MCP
+- **Développeur** : Dev 1
+- **Fichiers** : `src/sandbox/core.py` (enrichissement), `src/mcp/dynamic_manual.py`
+- **Description** :
+  Garantir la terminaison des boucles infinies à 30 secondes et générer la documentation Markdown dynamique des outils.
+  - Dans `src/sandbox/core.py` : terminer de force le sous-processus via `terminate()` / `kill()` au bout de 30s (`max_execution_time_seconds`). Renseigner `ExecutionResult.is_timeout = True`.
+  - Dans `src/mcp/dynamic_manual.py` : `class DynamicManualGenerator.generate(tools: list[MCPToolDefinition]) -> str` produisant la documentation Markdown à injecter dans le system prompt.
+- **Critères d'acceptation** :
+  - [ ] Un code `while True: pass` est tué en ≤ 32 secondes sans bloquer l'agent.
+  - [ ] `ExecutionResult.is_timeout == True` sur timeout.
+  - [ ] Le manuel généré liste fidèlement noms, signatures et descriptions des outils MCP connectés.
 
 ---
 
-## [S2-DEV1-03] CLI Interactif `uv run sandbox`
-
-**Label** : `Dev 1` · `Sprint 2` · `Sandbox`
-
-**Description**
-Fournir le REPL interactif de test manuel de la sandbox (Section V.2.1).
-Fichiers cibles : `src/sandbox/cli.py`, `pyproject.toml`
-
-**`SandboxCLIApp`** dans `src/sandbox/cli.py`
-- `__init__(argv: Optional[list[str]] = None)` : parse positional `config.json` optionnel, `--mcp-stdio <command>`, `--mcp-server <url>`
-- `setup_session() -> None` : charge `SandboxConfig`, se connecte au serveur MCP si spécifié, initialise `SandboxRunner`
-- `start_repl() -> None` : boucle `while True` → affiche `>>> ` → lit l'entrée → `execute()` → affiche résultat; quitte sur `exit` ou `EOFError`
-- `@classmethod main() -> None`
-
-Dans `pyproject.toml` :
-```toml
-[project.scripts]
-sandbox = "src.sandbox.cli:SandboxCLIApp.main"
-```
-
-**Critères d'acceptation**
-- [ ] `uv run sandbox` ouvre une invite `>>> ` interactive
-- [ ] `uv run sandbox sandbox_template.json` charge la configuration sans erreur
-- [ ] `uv run sandbox sandbox_template.json --mcp-stdio "python mcp_tools_mbpp.py"` connecte le serveur MCP et expose `run_tests` dans le REPL
-- [ ] Taper `exit` ou `Ctrl+D` ferme proprement le CLI
+### [S2-DEV1-03] REPL CLI Sandbox (uv run sandbox)
+- **Développeur** : Dev 1
+- **Fichiers** : `src/sandbox/cli.py`, `pyproject.toml`
+- **Description** :
+  Implémenter le CLI interactif REPL conforme à la Section V.2.1 du sujet.
+  - `class SandboxCLIApp` dans `src/sandbox/cli.py` : parsing arguments, initialisation sandbox/MCP, invite `>>> `, exécution de code utilisateur, sortie sur `exit` ou `Ctrl+D`.
+  - Déclarer le script dans `pyproject.toml` : `[project.scripts] sandbox = "src.sandbox.cli:SandboxCLIApp.main"`.
+- **Critères d'acceptation** :
+  - [ ] La commande `uv run sandbox` ouvre le prompt interactif `>>> `.
+  - [ ] `uv run sandbox sandbox_template.json --mcp-stdio "python mcp_tools_mbpp.py"` connecte les outils MBPP.
+  - [ ] Taper `Ctrl+D` ou `exit` quitte proprement le programme avec le code 0.
 
 ---
 
-## [S2-DEV2-01] Exceptions Typées & Logging stderr
-
-**Label** : `Dev 2` · `Sprint 2` · `Robustesse`
-
-**Description**
-Garantir qu'aucune erreur interne ne crashe l'agent et que les logs ne polluent jamais `stdout`.
-Fichiers cibles : `src/core/exceptions.py`, `src/core/logger.py`
-
-**Hiérarchie dans `src/core/exceptions.py`**
-- `AgentSmithException(Exception)` : méthode `to_log_message() -> str`
-- `SandboxSecurityError(AgentSmithException)` : violation import, path, réseau
-- `SandboxTimeoutError(AgentSmithException)` : dépassement des 30s
-- `SandboxMemoryError(AgentSmithException)` : dépassement RAM
-- `MCPCommunicationError(AgentSmithException)` : rupture de connexion MCP
-- `LLMQuotaExhaustedError(AgentSmithException)` : toutes les clés en 429
-- `TokenLimitExceededError(AgentSmithException)` : plafond de tokens cumulés
-- `MaxIterationsReachedError(AgentSmithException)` : max iters sans `final_answer`
-
-**Dans `src/core/logger.py`**
-- `setup_logging(level: str = "INFO", log_file: Optional[Path] = None) -> None` : configure `logging.basicConfig` avec `stream=sys.stderr` et format `[%(asctime)s] [%(levelname)s] %(name)s: %(message)s`
-- Tous les modules utilisent ensuite `import logging; logger = logging.getLogger(__name__)`
-
-**Critères d'acceptation**
-- [ ] Lever `LLMQuotaExhaustedError` depuis la boucle agent produit un `SolutionOutput` avec `success: false` et `error: "..."` sans crash
-- [ ] Aucun log n'apparaît sur `stdout` (vérifiable avec `uv run python -m agent_mbpp ... 2>/dev/null | grep -c "."`)
-- [ ] `SystemExit` et `KeyboardInterrupt` ne sont pas interceptés par les `except AgentSmithException`
+### [S2-DEV2-01] Exceptions Centralisées & Logging stderr
+- **Développeur** : Dev 2
+- **Fichiers** : `src/core/exceptions.py`, `src/core/logger.py`
+- **Description** :
+  Centraliser la gestion des erreurs typées et orienter toute la journalisation sur `sys.stderr`.
+  - Dans `src/core/exceptions.py` : `AgentSmithException` et sous-classes (`SandboxSecurityError`, `SandboxTimeoutError`, `LLMQuotaExhaustedError`, `TokenLimitExceededError`, `MaxIterationsReachedError`).
+  - Dans `src/core/logger.py` : `setup_logging()` configurant `StreamHandler(sys.stderr)`.
+- **Critères d'acceptation** :
+  - [ ] Aucun log n'est écrit sur `stdout` (`python -m agent_mbpp ... 2>/dev/null` ne produit aucun log).
+  - [ ] Une `AgentSmithException` est interceptée proprement par l'agent pour renseigner `SolutionOutput.error`.
+  - [ ] `SystemExit` et `KeyboardInterrupt` ne sont jamais capturés par les blocs d'exceptions de l'agent.
 
 ---
 
-## [S2-DEV2-02] TokenRotator & LLMRouter (Anti-429 & Fallback)
-
-**Label** : `Dev 2` · `Sprint 2` · `LLM`
-
-**Description**
-Encaisser les erreurs de quota et réessayer automatiquement sans interrompre l'agent.
-Fichiers cibles : `src/llm/token_manager.py`, `src/llm/router.py`
-
-**`TokenRotator`** dans `src/llm/token_manager.py`
-- `__init__(env_prefix: str)` : charge `{PREFIX}`, `{PREFIX}_1`, `{PREFIX}_2`, ... depuis `os.environ`
-- `get_active_key() -> str`
-- `rotate_key() -> str` : bascule sur la clé suivante disponible
-- `mark_exhausted(key: str, cooldown_seconds: int = 3600) -> None`
-
-**`LLMRouter`** dans `src/llm/router.py`
-- `__init__(primary_client: BaseLLMClient, fallback_clients: list[BaseLLMClient] = [], max_retries: int = 3)`
-- `async query(messages: list[dict], stop_sequences: Optional[list[str]] = None) -> tuple[LLMResponse, int]` : retourne `(response, retries_count)`; sur HTTP 429, appelle `token_rotator.rotate_key()` et réessaie; sur erreur persistante, bascule sur `fallback_clients`
-
-**Critères d'acceptation**
-- [ ] Simulation HTTP 429 → `rotate_key()` appelé → requête réussie → `retries_count == 1`
-- [ ] Si toutes les clés sont épuisées → `LLMQuotaExhaustedError` levée
-- [ ] Le `retries_count` retourné correspond exactement au nombre de tentatives supplémentaires effectuées
+### [S2-DEV2-02] KeyManager & TokenTracker (Anti-429 & Retries)
+- **Développeur** : Dev 2
+- **Fichiers** : `src/llm/key_manager.py`, `src/llm/token_tracker.py`
+- **Description** :
+  Découpler la rotation des clés d'API (résilience) de la métrologie et de la gestion des retries avec backoff.
+  - Dans `src/llm/key_manager.py` : `class KeyManager` chargeant `{PREFIX}`, `{PREFIX}_1`, `{PREFIX}_2`... avec `get_active_key()`, `rotate_key()`, `mark_exhausted()`.
+  - Dans `src/llm/token_tracker.py` : `class TokenTracker.query()` mesurant la latence, effectuant les retries avec backoff exponentiel et appelant `KeyManager.rotate_key()` sur code HTTP 429.
+- **Critères d'acceptation** :
+  - [ ] Simulation d'une erreur HTTP 429 → déclenchement immédiat de `rotate_key()` sans lever d'exception à l'agent.
+  - [ ] Épuisement de toutes les clés → levée de `LLMQuotaExhaustedError`.
+  - [ ] `StepMetrics.retries` reflète exactement le nombre de retries effectués lors du pas.
 
 ---
 
-## [S2-DEV2-03] Extraction Multi-Formats & Plafonds Durs MBPP
-
-**Label** : `Dev 2` · `Sprint 2` · `Agent`
-
-**Description**
-Accepter toutes les syntaxes de sortie LLM et respecter les limites strictes MBPP.
-Fichiers cibles : `src/core/extraction.py` (enrichissement), `src/core/loop.py` (enrichissement)
-
-**Enrichir `CodeExtractor`** dans `src/core/extraction.py`
-- `_parse_xml_tool_call(text) -> Optional[CodeExtractionResult]` : `<invoke name="f"><parameter name="x">val</parameter></invoke>` → `f(x=val)`
-- `_parse_hermes_json(text) -> Optional[CodeExtractionResult]` : `<tool_call>{"name":"f","arguments":{...}}</tool_call>` → `f(**{...})`
-- `_parse_react_format(text) -> Optional[CodeExtractionResult]` : `Action: f\nAction Input: {...}` → `f(**{...})`
-
-**Enrichir `AgentLoop._enforce_hard_limits()`** dans `src/core/loop.py`
-- Plafonds MBPP stricts : 10 itérations max, 6 000 tokens input cumulés, 1 500 tokens output cumulés, 120 secondes globales
-- Lève `MaxIterationsReachedError` ou `TokenLimitExceededError` selon le dépassement
-
-**Critères d'acceptation**
-- [ ] `test_code_extraction.py` : 4 tests (un par format) passent tous
-- [ ] Un run MBPP s'arrête automatiquement à l'itération 10 et produit `solution.json` avec `success: false` et `MaxIterationsReachedError` dans `error`
-- [ ] Un run MBPP s'arrête si les tokens cumulés dépassent 6 000 en entrée
+### [S2-DEV2-03] Extraction Multi-Formats & Plafonds MBPP
+- **Développeur** : Dev 2
+- **Fichiers** : `src/core/extraction.py` (enrichissement), `src/core/loop.py` (enrichissement)
+- **Description** :
+  Gérer l'extraction de code sur 4 formats et appliquer strictement les limites dures du benchmark MBPP.
+  - Dans `src/core/extraction.py` : support XML Anthropic (`<invoke>`), JSON Hermes (`<tool_call>`), et ReAct (`Action / Action Input`), convertis en syntaxe d'appel Python.
+  - Dans `src/core/loop.py` : `_enforce_hard_limits()` validant max 10 itérations, 6 000 tokens in, 1 500 out, et 120 secondes cumulées.
+- **Critères d'acceptation** :
+  - [ ] `test_code_extractor.py` passe avec succès sur les 4 formats.
+  - [ ] Dépassement de 10 itérations → arrêt propre avec `MaxIterationsReachedError` dans `solution.json`.
+  - [ ] Dépassement de 6 000 tokens in cumulés → arrêt propre avec `TokenLimitExceededError`.
+  - [ ] Validation de 4/5 tâches MBPP réussie lors d'une session complète d'examen.
 
 ---
 
-# 🔵 SPRINT 3 — Extension SWE-bench
-> Fin de sprint : L'agent corrige de manière autonome au moins 1 bug SWE-bench et produit un patch `git diff` valide.
+# 🔵 SPRINT 3 — Extension SWE-bench & Docker
+> **Objectif du jalon** : L'agent résout de manière autonome au moins 1 bug SWE-bench dans un conteneur Docker et produit un patch git diff valide.
 
 ---
 
-## [S3-DEV1-01] SWEBenchToolKit : Outils Fichiers & Recherche de Code
-
-**Label** : `Dev 1` · `Sprint 3` · `Outils`
-
-**Description**
-Implémenter les 6 outils de navigation et modification de code dans le testbed.
-Fichier cible : `src/tools/swebench.py` (partie 1)
-
-**`SWEBenchToolKit`** (partie 1)
-- `__init__(workspace_root: Optional[Path] = None)` : utilise `Path(os.environ.get("TESTBED_PATH", "."))` si pas de paramètre
-- `read_file(filepath: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> str` : sortie format strict `cat -n` : chaque ligne préfixée par `<n>: ` avec alignement
-- `edit_file(filepath: str, old_str: str, new_str: str) -> str` : remplace la première occurrence exacte de `old_str` par `new_str`; retourne un message d'erreur si `old_str` non trouvé
-- `list_files(directory: str, pattern: Optional[str] = None) -> list[str]` : chemins absolus, filtrage glob optionnel
-- `search_code(pattern: str, file_pattern: Optional[str] = None) -> str` : grep récursif; format de sortie strict `/absolute/path/file.py:42 <line content>`
-- `search_function_or_class_definition_in_code(name: str) -> str` : retourne le fichier et le numéro de ligne de la définition `def name` ou `class name`
-- `find_references(name: str, filepath: str, line: int) -> str` : retourne toutes les lignes contenant `name` avec leur chemin et numéro de ligne
-
-**Critères d'acceptation**
-- [ ] `read_file("file.py")` : chaque ligne commence par son numéro aligné à droite suivi de `: `
-- [ ] `edit_file("file.py", "foo", "bar")` : le fichier est modifié sur disque
-- [ ] `edit_file("file.py", "NONEXISTENT", "bar")` : retourne un message d'erreur sans modifier le fichier
-- [ ] `search_code("def run")` : chaque ligne de résultat est au format `/abs/path/file.py:12 def run(...):`
-- [ ] Les 6 outils passent les tests unitaires de `test_mandatory_tools.py`
+### [S3-DEV1-01] Outils Fichiers & Recherche SWE-bench
+- **Développeur** : Dev 1
+- **Fichiers** : `src/tools/file_tools.py`, `src/tools/search_tools.py`
+- **Description** :
+  Implémenter les 6 outils de navigation et d'édition de code dans le testbed (*Sections V.5.1 & V.5.2*).
+  - Dans `src/tools/file_tools.py` : `class FileTools` avec `read_file` (format strict `cat -n`), `edit_file` (remplacement exact), `list_files` (glob).
+  - Dans `src/tools/search_tools.py` : `class SearchTools` avec `search_code` (format grep strict `/abs/path:<line> <content>`), `search_function_or_class_definition_in_code`, `find_references`.
+- **Critères d'acceptation** :
+  - [ ] `read_file` affiche chaque ligne avec son numéro de ligne aligné suivi de `: `.
+  - [ ] `edit_file` remplace fidèlement une sous-chaîne ou renvoie un message explicite si introuvable.
+  - [ ] `search_code` produit la sortie au format `/chemin/fichier.py:<ligne> <contenu>`.
+  - [ ] `test_mcp_tools.py` valide unitairement ces 6 outils.
 
 ---
 
-## [S3-DEV1-02] SWEBenchToolKit : Exécution & Git Diff
-
-**Label** : `Dev 1` · `Sprint 3` · `Outils`
-
-**Description**
-Implémenter les 3 outils d'exécution et d'extraction du patch final.
-Fichier cible : `src/tools/swebench.py` (partie 2)
-
-**`SWEBenchToolKit`** (partie 2, ajout à la classe)
-- `run_tests() -> str` : exécute le script d'évaluation dans `self.workspace_root`; retourne stdout + stderr combinés
-- `get_patch() -> str` : exécute `git -c core.fileMode=false diff` depuis `self.workspace_root`; retourne le diff unifié brut
-- `run_command(command: str, workdir: Optional[str] = None) -> dict` : exécute via `subprocess.run`; retourne `{"stdout": str, "stderr": str, "exit_code": int}`
-
-**Critères d'acceptation**
-- [ ] Après `edit_file()`, `get_patch()` retourne un diff non vide au format unified diff
-- [ ] `run_command("echo hello")` retourne `{"stdout": "hello\n", "stderr": "", "exit_code": 0}`
-- [ ] `run_command("exit 1")` retourne `{"exit_code": 1}`
-- [ ] Les 3 outils passent les tests unitaires de `test_mandatory_tools.py`
+### [S3-DEV1-02] Outils Exécution, Git Diff & Serveur MCP SWE-bench
+- **Développeur** : Dev 1
+- **Fichiers** : `src/tools/execution_tools.py`, `mcp_tools_swebench.py`, `src/mcp/client.py` (enrichissement)
+- **Description** :
+  Implémenter les 3 outils d'exécution/patch et le serveur MCP SWE-bench racine supportant stdio et HTTP SSE (*Section V.5.3*).
+  - Dans `src/tools/execution_tools.py` : `class ExecutionTools` avec `run_tests()`, `get_patch()` (`git -c core.fileMode=false diff`), `run_command(command, workdir)`.
+  - Dans `mcp_tools_swebench.py` : `class SWEBenchMCPServer` exposant les 9 outils via `TESTBED_PATH`.
+  - Dans `src/mcp/client.py` : support de `connect_http(url: str)` pour transport HTTP SSE.
+- **Critères d'acceptation** :
+  - [ ] `get_patch()` renvoie un patch git unifié propre après une modification de fichier.
+  - [ ] `run_command("pwd")` retourne le bon répertoire de travail et le code de retour 0.
+  - [ ] `python mcp_tools_swebench.py` démarre sans erreur en mode stdio et répond aux appels d'outils.
 
 ---
 
-## [S3-DEV1-03] Serveur MCP SWE-bench & Transport HTTP SSE
-
-**Label** : `Dev 1` · `Sprint 3` · `MCP`
-
-**Description**
-Exposer les 9 outils SWE-bench via MCP et enrichir le client pour supporter le transport HTTP SSE.
-Fichiers cibles : `mcp_tools_swebench.py`, `src/mcp/client.py` (enrichissement), `src/mcp/tools.py` (enrichissement)
-
-**`SWEBenchMCPServer`** dans `mcp_tools_swebench.py`
-- `__init__(testbed_path: Optional[str] = None)` : instancie `SWEBenchToolKit(workspace_root=...)`
-- `register_tools() -> None` : enregistre les 9 outils
-- `run(transport: str = "stdio", host: str = "127.0.0.1", port: int = 8000) -> None`
-- `@classmethod main() -> None`
-
-**Enrichir `MCPClient`** dans `src/mcp/client.py`
-- `async connect_http(url: str) -> None` : connexion HTTP SSE
-
-**Enrichir `MCPToolManager`** dans `src/mcp/tools.py`
-- `generate_markdown_manual(tools: list[MCPToolDefinition]) -> str` : génère la doc des outils pour le system prompt
-
-**Critères d'acceptation**
-- [ ] `python mcp_tools_swebench.py` démarre sans erreur
-- [ ] Le client MCP peut appeler `read_file` via le serveur SWE-bench
-- [ ] Le manuel généré liste correctement les 9 outils avec leurs paramètres
-- [ ] `MCPClient.connect_http("http://localhost:8000")` se connecte sans erreur
+### [S3-DEV2-01] DockerManager & Nettoyage Garanti
+- **Développeur** : Dev 2
+- **Fichier** : `src/tools/docker_manager.py`
+- **Description** :
+  Gérer le cycle de vie des conteneurs Docker pour SWE-bench avec garantie d'absence de conteneur orphelin.
+  - `class DockerManager.__init__(image_name: str, instance_id: str)`.
+  - `start_container() -> str` : lance le conteneur en arrière-plan et configure `TESTBED_PATH`.
+  - `cleanup_container() -> None` : stoppe et supprime le conteneur.
+  - Armement automatique des handlers `signal.SIGTERM`, `signal.SIGINT` et `atexit.register(cleanup_container)`.
+  - `execute_in_container(command: str) -> tuple[int, str, str]`.
+- **Critères d'acceptation** :
+  - [ ] Le conteneur Docker de la tâche démarre et exécute des commandes.
+  - [ ] Un arrêt abrupt par `Ctrl+C` ou `kill <PID>` supprime immédiatement le conteneur Docker.
+  - [ ] Aucun conteneur résiduel n'apparaît dans `docker ps -a` après exécution.
 
 ---
 
-## [S3-DEV2-01] Docker Lifecycle & CLI agent_swebench
-
-**Label** : `Dev 2` · `Sprint 3` · `Infrastructure`
-
-**Description**
-Gérer le cycle de vie du conteneur Docker et créer le script d'évaluation SWE-bench.
-Fichier cible : `agent_swebench.py`
-
-**`SWEBenchAgentApp`** dans `agent_swebench.py`
-- `__init__(args=None)` : parse `--task-file`, `--output`, `--model-name`, `--provider-url`, `--max-iterations`
-- `load_task() -> SWEBenchTaskInput`
-- `setup_docker_environment() -> None` : `docker run -d {docker_image}`, configure `TESTBED_PATH`, enregistre `signal.signal(signal.SIGTERM, cleanup)` et `atexit.register(cleanup)`
-- `cleanup_docker_environment() -> None` : `docker stop` + `docker rm`
-- `execute() -> SolutionOutput`
-- `save_solution(solution: SolutionOutput) -> None`
-- `@classmethod main() -> None` : bloc `try...finally` garantissant `cleanup_docker_environment()`
-
-**Critères d'acceptation**
-- [ ] Le script démarre un conteneur Docker, vérifie qu'il tourne, exécute l'agent
-- [ ] `Ctrl+C` pendant l'exécution → le conteneur est arrêté et supprimé proprement
-- [ ] Le script retourne le code 0 si `solution.success == True`, 1 sinon
-- [ ] Pas de conteneur orphelin après chaque exécution (vérifiable avec `docker ps -a`)
+### [S3-DEV2-02] Orchestrateur SWEBenchAgent & Plafonds Durs
+- **Développeur** : Dev 2
+- **Fichiers** : `src/models/tasks.py` (enrichissement), `src/agent/swebench_agent.py`, `agent_swebench.py`
+- **Description** :
+  Créer l'orchestrateur SWE-bench et appliquer ses limites spécifiques.
+  - `class SWEBenchTaskInput` dans `src/models/tasks.py`.
+  - `class SWEBenchAgent` dans `src/agent/swebench_agent.py` : pilote Docker, initialise MCP SWE-bench, exécute `AgentLoop` avec les plafonds SWE-bench (30 iters, 300k in, 10k out, 900s), et enregistre `final_answer(get_patch())`.
+  - `class SWEBenchAgentApp` dans `agent_swebench.py` pour point d'entrée `python -m agent_swebench`.
+- **Critères d'acceptation** :
+  - [ ] `uv run python -m agent_swebench --task-file swe_task.json --output solution.json ...` s'exécute de bout en bout.
+  - [ ] `SolutionOutput.solution` contient un git diff unifié non vide lors d'une résolution.
+  - [ ] Dépassement de 30 itérations ou 900s → arrêt propre sans crash et statut `success: false`.
 
 ---
 
-## [S3-DEV2-02] Plafonds SWE-bench & Modèle SWEBenchTaskInput
-
-**Label** : `Dev 2` · `Sprint 3` · `Agent`
-
-**Description**
-Charger les tâches SWE-bench et appliquer ses plafonds spécifiques dans la boucle.
-Fichiers cibles : `src/models/tasks.py` (enrichissement), `src/core/loop.py` (enrichissement)
-
-**`SWEBenchTaskInput(BaseModel)`** dans `src/models/tasks.py`
-- Champs : `instance_id: str`, `problem_statement: str`, `docker_image: str`, `eval_script: str`, `hints_text: str = ""`, `repo: str = ""`
-
-**Enrichir `AgentLoop._enforce_hard_limits()`**
-- Plafonds SWE-bench : 30 itérations, 300 000 tokens input cumulés, 10 000 tokens output cumulés, 900 secondes globales
-- La convention de réponse réussie est `final_answer(get_patch())` : le champ `SolutionOutput.solution` contient le patch git
-
-**Critères d'acceptation**
-- [ ] `SWEBenchTaskInput.model_validate(json.loads(task_file))` parse sans erreur le fichier de tâche de la moulinette
-- [ ] Un run SWE-bench dépassant 30 itérations produit `solution.json` avec `success: false` et l'erreur appropriée
-- [ ] `SolutionOutput.solution` contient un diff `git` valide quand l'agent termine avec succès
+### [S3-DEV2-03] Prompt SWE-bench & Client Gemini
+- **Développeur** : Dev 2
+- **Fichiers** : `src/core/prompt.py` (enrichissement), `src/llm/gemini.py`
+- **Description** :
+  Spécialiser les consignes du prompt pour la navigation de grands repos et ajouter l'adaptateur Google Gemini.
+  - Dans `src/core/prompt.py` : instructions de recherche chirurgicale, repérage de tests existants et obligation d'appeler `final_answer(get_patch())`.
+  - Dans `src/llm/gemini.py` : `class GeminiClient(BaseLLMClient)` pour l'API Google Gemini / AI Studio.
+- **Critères d'acceptation** :
+  - [ ] L'agent cible correctement les fichiers de test du bug avant de modifier le code source.
+  - [ ] `GeminiClient` effectue des requêtes réelles et s'intègre en fallback dans `TokenTracker`.
 
 ---
 
-## [S3-DEV2-03] Prompt SWE-bench & Client Gemini
-
-**Label** : `Dev 2` · `Sprint 3` · `LLM`
-
-**Description**
-Adapter le system prompt au contexte de recherche de bugs et ajouter Gemini comme provider de secours.
-Fichiers cibles : `src/core/prompt.py` (enrichissement), `src/llm/gemini.py`
-
-**Enrichir `PromptManager.build_system_prompt()`**
-- Inclure les instructions SWE-bench : explorer le code en premier, lire les tests existants, modifier de façon chirurgicale, terminer avec `final_answer(get_patch())`
-
-**`GeminiClient(BaseLLMClient)`** dans `src/llm/gemini.py`
-- `async generate(messages, stop_sequences) -> LLMResponse` : appel via l'API REST Gemini ou `google-genai` SDK
-
-**Critères d'acceptation**
-- [ ] Le system prompt SWE-bench mentionne explicitement `get_patch()` et `final_answer()`
-- [ ] `GeminiClient` retourne une `LLMResponse` valide avec un vrai modèle Gemini
-- [ ] Le `LLMRouter` accepte `GeminiClient` en fallback si les providers OpenAI-compatible sont épuisés
+# 📊 SPRINT 4 — Benchmarks, Rapport & Soutenance (Travail Conjoint)
+> **Objectif du jalon** : Rapports conformes au Chapitre V.7, documentation bilingue et validation de la grille d'examen.
 
 ---
 
-# 📊 SPRINT 4 — Benchmarks, Rapport & Soutenance
-> Fin de sprint : Rapports complets et conformes au Chapitre V.7, prêts pour la présentation.
+### [S4-TEAM-01] Campagne de Benchmark (5 Modèles × 3 Tâches)
+- **Développeurs** : Dev 1 + Dev 2
+- **Répertoire** : `benchmark_artifacts/`
+- **Description** :
+  Exécuter le benchmark officiel exigé par le Chapitre V.7 sur 3 tâches SWE-bench Verified (ex: `sympy__sympy-14711`, `sympy__sympy-13480`, `pydata__xarray-4629`).
+  - Comparer au moins 5 modèles sur au moins 2 providers gratuits (Groq, OpenRouter, Gemini).
+  - Conserver les 15 fichiers `solution.json` dans `benchmark_artifacts/<task_id>/<model>_solution.json`.
+- **Critères d'acceptation** :
+  - [ ] Les 15 fichiers `solution.json` sont présents et validés sans erreur par Pydantic.
+  - [ ] Au moins 2 providers distincts sont représentés dans les traces de pas (`api_url`).
 
 ---
 
-## [S4-TEAM-01] Campagne de Benchmark : 5 Modèles × 3 Tâches
-
-**Label** : `Dev 1 + Dev 2` · `Sprint 4` · `Benchmark`
-
-**Description**
-Évaluer l'agent sur un panel représentatif de modèles et collecter les preuves d'évaluation.
-Répertoire cible : `benchmark_artifacts/`
-
-Tâches SWE-bench recommandées : `sympy__sympy-14711`, `sympy__sympy-13480`, `xarray__xarray-4629`
-Modèles exemples : `llama-3.1-8b`, `llama-3.1-70b`, `gemma-2-9b`, `mixtral-8x7b`, `gemini-1.5-flash`
-Providers : Groq et OpenRouter (au moins 2 différents)
-
-Organisation des artefacts :
-```
-benchmark_artifacts/
-├── sympy__sympy-14711/
-│   ├── llama-3.1-8b_solution.json
-│   ├── llama-3.1-70b_solution.json
-│   └── ...
-├── sympy__sympy-13480/
-│   └── ...
-└── xarray__xarray-4629/
-    └── ...
-```
-
-**Critères d'acceptation**
-- [ ] 15 fichiers `solution.json` présents (5 modèles × 3 tâches)
-- [ ] Chaque `solution.json` est valide (parseable par Pydantic sans erreur)
-- [ ] Au moins 2 providers différents utilisés (vérifiable dans `api_url` des `StepMetrics`)
-- [ ] Les `solution.json` incluent les champs `steps`, `total_input_tokens`, `total_time_seconds`
+### [S4-TEAM-02] Métriques Intermédiaires & Étude d'Ablation
+- **Développeurs** : Dev 2 pilote, Dev 1 analyse
+- **Fichier** : Données pour `BENCHMARK_REPORT.md`
+- **Description** :
+  Extraire les indicateurs d'efficacité de raisonnement et réaliser une expérience comparative d'ablation.
+  - Métriques intermédiaires (au moins 2) : pas de première lecture du fichier du patch, pas de premier run de test, pas de réduction des échecs.
+  - Étude d'ablation : évaluer le même modèle sur les mêmes tâches avec une modification ciblée (ex: avec vs sans l'outil `search_code`, ou prompt avec vs sans instructions d'exploration).
+- **Critères d'acceptation** :
+  - [ ] Tableaux des métriques intermédiaires remplis avec les données réelles issues des `solution.json`.
+  - [ ] Étude d'ablation documentée avec résultats chiffrés avant/après.
 
 ---
 
-## [S4-TEAM-02] Métriques Intermédiaires & Ablation Study
-
-**Label** : `Dev 2 pilote` · `Sprint 4` · `Analyse`
-
-**Description**
-Calculer des indicateurs de qualité de raisonnement et mener une expérience comparative.
-Résultats à consigner dans `BENCHMARK_REPORT.md`
-
-**Métriques intermédiaires à calculer** pour chaque run :
-- Étape du premier appel à `read_file` sur le fichier impliqué dans le bug
-- Étape du premier appel à `run_tests`
-- Étape où `run_tests` retourne moins d'échecs qu'au départ
-
-**Ablation study** : comparer deux configurations, par exemple :
-- Version A : avec `search_code` disponible
-- Version B : sans `search_code` (outil retiré du serveur MCP)
-
-**Critères d'acceptation**
-- [ ] Tableau des métriques intermédiaires rempli pour au moins 3 runs
-- [ ] Au moins une ablation documentée avec 2 résultats chiffrés à comparer
-- [ ] Les données sont issues des vrais `solution.json` (pas de valeurs inventées)
+### [S4-TEAM-03] Rédaction du BENCHMARK_REPORT.md
+- **Développeur** : Dev 2 pilote
+- **Fichier** : `BENCHMARK_REPORT.md` à la racine
+- **Description** :
+  Rédiger le rapport complet imposé par le Chapitre V.7 du sujet.
+  - Setup (modèles, providers, justification du choix des tâches).
+  - Tableau des résultats (Pass/Fail, itérations, tokens in/out, temps wall-clock).
+  - Fiabilité provider (latence moyenne, nombre de retries).
+  - Métriques intermédiaires et analyse d'ablation.
+  - Conclusion justifiant le modèle retenu pour le pipeline final.
+- **Critères d'acceptation** :
+  - [ ] Le document contient l'ensemble des sections requises par la Section V.7.
+  - [ ] Les analyses s'appuient sur les données réelles des fichiers de `benchmark_artifacts/`.
 
 ---
 
-## [S4-TEAM-03] Rédaction BENCHMARK_REPORT.md
-
-**Label** : `Dev 2 pilote` · `Sprint 4` · `Documentation`
-
-**Description**
-Rédiger le rapport comparatif complet conformément au Chapitre V.7 du sujet.
-Fichier cible : `BENCHMARK_REPORT.md`
-
-Contenu attendu :
-1. **Introduction** : Choix des tâches et des modèles, explication de la méthodologie
-2. **Tableau de résultats principaux** : Modèle, provider, succès (✅/❌), tokens consommés, latence moyenne, retries
-3. **Tableau des métriques intermédiaires** : Étapes de première lecture, premier test, première amélioration
-4. **Ablation Study** : Résultats avec et sans l'outil comparé, analyse de l'impact
-5. **Conclusion** : Quel modèle/provider recommander et pourquoi
-
-**Critères d'acceptation**
-- [ ] Le rapport contient au minimum 2 tableaux de données numériques
-- [ ] La section Ablation Study présente deux résultats chiffrés comparables
-- [ ] La conclusion argumente un choix de modèle avec des données à l'appui
-- [ ] Le fichier est en Markdown valide et lisible sur GitHub
-
----
-
-## [S4-TEAM-04] Rédaction README.md (Chapitre VII)
-
-**Label** : `Dev 1 pilote` · `Sprint 4` · `Documentation`
-
-**Description**
-Rédiger la documentation principale conforme aux exigences du Chapitre VII du sujet.
-Fichier cible : `README.md`
-
-Sections obligatoires :
-1. Première phrase en italique 42 (*"As a 42 student..."*)
-2. Description de l'architecture et de la boucle agentique
-3. Explication du sandbox et de ses mécanismes de sécurité
-4. Liste et description des outils disponibles (MBPP et SWE-bench)
-5. Instructions de lancement :
-   - `uv run sandbox sandbox_template.json --mcp-stdio "python mcp_tools_mbpp.py"`
-   - `uv run python -m agent_mbpp --task-file <PATH> --output <PATH> --model-name <NAME> --provider-url <URL>`
-   - `uv run python -m agent_swebench --task-file <PATH> --output <PATH> --model-name <NAME> --provider-url <URL>`
-
-**Critères d'acceptation**
-- [ ] La première phrase du README est en italique et commence par *"As a 42 student..."*
-- [ ] Les 3 commandes de lancement sont présentes et syntaxiquement correctes
-- [ ] La section Sandbox explique au moins 3 mécanismes de sécurité (imports, réseau, mémoire)
-- [ ] Le README est rédigé intégralement en anglais
+### [S4-TEAM-04] Rédaction du README.md (Norme 42)
+- **Développeur** : Dev 1 pilote
+- **Fichier** : `README.md` à la racine
+- **Description** :
+  Rédiger la documentation officielle en anglais respectant toutes les consignes du Chapitre VII.
+  - Première ligne obligatoire en italique : *This project has been created as part of the 42 curriculum by <login1>, <login2>.*
+  - Sections : Description, Instructions d'installation/lancement, Ressources & utilisation de l'IA.
+  - Détail de l'architecture, de la boucle agentique, du sandbox et des outils.
+- **Critères d'acceptation** :
+  - [ ] Rédigé intégralement en anglais.
+  - [ ] Première phrase exactement conforme aux exigences du sujet.
+  - [ ] Les commandes `uv run sandbox`, `uv run python -m agent_mbpp`, et `uv run python -m agent_swebench` sont documentées et fonctionnelles.
