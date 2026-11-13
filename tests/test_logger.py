@@ -1,6 +1,7 @@
 """Unit tests for the centralized logging module (src/core/logger.py)."""
 
 import logging
+import subprocess
 import sys
 import pytest
 
@@ -65,3 +66,34 @@ def test_lazy_initialization() -> None:
     assert len(root_agent_logger.handlers) > 0
     assert isinstance(root_agent_logger.handlers[0], logging.StreamHandler)
     assert root_agent_logger.handlers[0].stream == sys.stderr
+
+
+def test_subprocess_stdout_isolation_with_stderr_redirect() -> None:
+    """Verify CLI invocation leaves stdout clean when stderr is redirected."""
+    code = (
+        "import sys\n"
+        "from src.core.logger import setup_agent_logging, get_logger\n"
+        "setup_agent_logging(level='DEBUG')\n"
+        "logger = get_logger('agent_mbpp')\n"
+        "logger.debug('Debug trace')\n"
+        "logger.info('Thought: solving problem')\n"
+        "logger.warning('Rate limit retry')\n"
+        "logger.error('Failed test assertion')\n"
+        "sys.stdout.write('{\"task_id\": 42, \"success\": true}')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    # Only strict JSON output on stdout (zero log pollution)
+    assert result.stdout == '{"task_id": 42, "success": true}'
+
+    # All 4 log messages must be present in stderr
+    assert "DEBUG" in result.stderr
+    assert "INFO" in result.stderr
+    assert "WARNING" in result.stderr
+    assert "ERROR" in result.stderr
+    assert "agent_smith.agent_mbpp" in result.stderr
