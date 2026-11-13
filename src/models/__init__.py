@@ -1,13 +1,25 @@
-"""Package des modèles de données Pydantic v2.
+"""Data models package for Agent Smith.
 
-Ce dossier contient les contrats de données stricts imposés par le sujet :
-- config.py  : Modèle SandboxConfig (allowlists d'imports avec wildcards,
-               répertoires autorisés, quotas mémoire et timeouts).
-- tasks.py   : Modèles d'entrée d'évaluation (MBPPTaskInput,
-               SWEBenchTaskInput).
-- metrics.py : Modèles d'évaluation et de journalisation (StepMetrics,
-               SolutionOutput pour le fichier solution.json).
-
-Ces modèles garantissent la validation stricte des entrées/sorties et la
-conformité aux exigences de la moulinette.
+Exports the official Pydantic models required for the moulinette evaluation:
+- StepMetrics: per-step iteration metrics.
+- SolutionOutput: required final solution output format (solution.json).
+- SandboxConfig: configuration model for the security sandbox.
+- MBPPTaskInput: task schema for MBPP algorithmic challenges.
+- SWEBenchTaskInput: task schema for SWE-bench Dockerized challenges.
 """
+
+from src.models.models_public import (
+    MBPPTaskInput,
+    SandboxConfig,
+    SolutionOutput,
+    StepMetrics,
+    SWEBenchTaskInput,
+)
+
+__all__ = [
+    "StepMetrics",
+    "SolutionOutput",
+    "SandboxConfig",
+    "MBPPTaskInput",
+    "SWEBenchTaskInput",
+]
