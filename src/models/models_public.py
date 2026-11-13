@@ -145,6 +145,25 @@ class SandboxConfig(BaseModel):
         description="Maximum memory in megabytes for sandbox execution",
     )
 
+    def is_import_authorized(self, module_name: str) -> bool:
+        """Check whether a module import is permitted by the allowlist.
+
+        Supports exact module matches (e.g., 'math') and wildcard
+        submodule patterns (e.g., 'collections.*' authorizes both
+        'collections' and 'collections.abc').
+        """
+        for pattern in self.authorized_imports:
+            if pattern == module_name:
+                return True
+            if pattern.endswith(".*"):
+                base_module = pattern[:-2]
+                if (
+                    module_name == base_module
+                    or module_name.startswith(f"{base_module}.")
+                ):
+                    return True
+        return False
+
 
 class MBPPTaskInput(BaseModel):
     """Input for an MBPP task — provided by the moulinette."""
