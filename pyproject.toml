@@ -5,10 +5,15 @@ description = "A standard 42 Python project template"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
-    { name = "marberge", email = "marberge@student.42lyon.fr" }
+    { name = "marberge", email = "marberge@student.42lyon.fr" },
+    { name = "stmaire", email = "stmaire@student.42.lyon.fr" },
 ]
 
-dependencies = []
+dependencies = [
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.2.4",
+    "requests>=2.34.2",
+]
 
 [dependency-groups]
 dev = [
