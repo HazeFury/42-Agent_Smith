@@ -12,6 +12,7 @@ wheels/
 # Virtual environments
 .venv
 
-documentation/*subject.pdf
+en.subject.pdf
 moulinette/
 .antigravity/
+.env
