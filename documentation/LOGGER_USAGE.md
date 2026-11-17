@@ -15,10 +15,10 @@ Notre logger est spécialement configuré pour envoyer **100% des messages sur `
 
 ---
 
-## 1. Comment utiliser le logger dans un module classique ?
-*(Sandbox, Serveur MCP, Outils, Orchestrateur, LLM Providers, etc.)*
+## 1. Comment utiliser le logger dans vos fichiers ?
+*(Modules, Serveurs MCP, Sandbox, Orchestrateur, Points d'entrée CLI, etc.)*
 
-Dans 99% des cas, vous êtes dans un fichier de code interne. Vous n'avez que **2 lignes** à écrire tout en haut de votre fichier :
+Dans **tous** les fichiers du projet sans exception, vous n'avez que **2 lignes** à écrire tout en haut de votre fichier :
 
 ```python
 from src.core.logger import get_logger
@@ -72,35 +72,36 @@ except Exception as e:
 
 ---
 
-## 3. Comment configurer les points d'entrée CLI ?
-*(Uniquement dans `src/main.py`, `agent_mbpp.py`, `agent_swebench.py`, `src/sandbox/cli.py`)*
+## 3. Les points d'entrée CLI
+*(`src/main.py`, `agent_mbpp.py`, `agent_swebench.py`, `src/sandbox/cli.py`)*
 
-Les points d'entrée sont les scripts exécutables au lancement. Ce sont les **seuls** fichiers du projet qui doivent appeler `setup_agent_logging()` :
+Les scripts exécutables au lancement n'ont **aucune configuration spécifique à faire**.
+Grâce à l'auto-initialisation du logger, ils s'utilisent exactement comme n'importe quel autre module :
 
 ```python
 import sys
-from src.core.logger import setup_agent_logging, get_logger
+from src.core.logger import get_logger
+from src.core.exceptions import AgentSmithException
+
+logger = get_logger(__name__)
 
 def main():
-    # 1. On initialise le parent 'agent_smith' sur sys.stderr une seule fois
-    setup_agent_logging(level="INFO")  # ou "DEBUG" si option verbeuse
-
-    # 2. On prend le logger de ce fichier
-    logger = get_logger(__name__)
     logger.info("Lancement de l'agent...")
-
     # ... reste du code ...
 
 if __name__ == "__main__":
     main()
 ```
 
+> [!NOTE]
+> `get_logger(__name__)` initialise automatiquement et de façon transparente le système de logging parent `agent_smith` sur `sys.stderr` au niveau `INFO` dès son tout premier appel.
+
 ---
 
 ## 4. Et si je suis dans un test unitaire `pytest` ?
 
-**Rien à faire !**
-Le module `logger.py` intègre une auto-initialisation paresseuse (*lazy loading*). Si vous écrivez un test dans `tests/test_something.py` sans passer par `main.py`, le premier appel à `get_logger(__name__)` détectera l'absence de configuration et initialisera automatiquement le logger par défaut sur `sys.stderr`.
+**Toujours rien de spécial à faire !**
+Comme pour le reste du code, le premier appel à `get_logger(__name__)` dans un test ou dans le code testé déclenche automatiquement l'initialisation sur `sys.stderr`.
 
 ---
 
@@ -111,4 +112,4 @@ Le module `logger.py` intègre une auto-initialisation paresseuse (*lazy loading
 | `print("Erreur:", err)` | `logger.error(f"Erreur: {err}")` |
 | `logger = logging.getLogger("mon_nom")` | `logger = get_logger(__name__)` |
 | Écrire des logs sur `sys.stdout` | Toujours diriger vers `sys.stderr` |
-| Appeler `setup_agent_logging()` dans un module métier | Appeler `setup_agent_logging()` uniquement dans les points d'entrée CLI |
+| Configurer manuellement les handlers | Laisser `get_logger(__name__)` s'auto-initialiser |

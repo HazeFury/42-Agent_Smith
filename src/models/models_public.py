@@ -4,7 +4,8 @@ Defines the JSON schema the moulinette expects in solution.json.
 """
 
 from datetime import datetime
-from typing import List, Optional
+from pathlib import Path
+from typing import List, Optional, Union
 from pydantic import BaseModel, Field
 
 
@@ -120,6 +121,12 @@ class SolutionOutput(BaseModel):
         default_factory=lambda: datetime.now().isoformat(),
         description="ISO 8601 timestamp of when solution was produced",
     )
+
+    def to_file(self, path: Union[str, Path]) -> None:
+        """Serialize solution output to a JSON file for the moulinette."""
+        filepath = Path(path)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        filepath.write_text(self.model_dump_json(indent=2), encoding="utf-8")
 
 
 class SandboxConfig(BaseModel):

@@ -1,7 +1,7 @@
 """Application main entry point for Agent Smith."""
 
 import sys
-from src.core.logger import setup_agent_logging, get_logger
+from src.core.logger import get_logger
 from src.core.exceptions import AgentSmithException
 
 logger = get_logger(__name__)
@@ -9,8 +9,6 @@ logger = get_logger(__name__)
 
 def main() -> int:
     """Execute main entry point and return process exit code."""
-
-    setup_agent_logging("INFO")
 
     try:
         logger.info("Main function launched!")
