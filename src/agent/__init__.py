@@ -10,4 +10,3 @@ Ce dossier contient les agents dédiés à chaque évaluation du sujet 42 :
                       30 iters / 900s / 300k tokens, génération et écriture du
                       patch git diff dans solution.json).
 """
-
