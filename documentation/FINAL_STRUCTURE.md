@@ -69,9 +69,8 @@ agent_smith/
     │
     ├── llm/                         # Abstraction LLM, résilience et métrologie
     │   ├── __init__.py
-    │   ├── base.py                  # BaseLLMClient (ABC) et dataclass/model LLMResponse
-    │   ├── openai_compatible.py     # Client unifié (Groq, OpenRouter, Mistral, Together)
-    │   ├── gemini.py                # Client Google AI Studio / Gemini
+    │   ├── base.py                  # Modèle Pydantic LLMResponse (réponse standardisée)
+    │   ├── openai_compatible.py     # Client unifié OpenAI-compatible (Groq, OpenRouter, NVIDIA NIM, Mistral, Together, Gemini)
     │   ├── key_manager.py           # Multi-token pool, détection 429 & rotation automatique
     │   └── token_tracker.py         # Décompte précis des tokens cumulés et mesure de latence
     │
