@@ -45,7 +45,8 @@ class BaseLLMClient(ABC):
         self.api_key = api_key
 
     @abstractmethod
-    def generate(
+    async def generate(
+            self,
             messages: list[dict[str, Any]],
             stop_sequences: list[str] | None = None) -> LLMResponse:
         pass
