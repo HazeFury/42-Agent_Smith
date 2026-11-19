@@ -14,30 +14,52 @@ All providers share the exact same JSON request and response contract:
 - Response: { "choices": [{ "message": { "content": ... } }], "usage": ... }
 """
 
+# format standard du JSON des reponses du LLM openAI compatible:
+# {
+#   "id": "chatcmpl-9xyz123abc",
+#   "object": "chat.completion",
+#   "created": 1718000000,
+#   "model": "llama-3.3-70b-versatile",
+#   "choices": [
+#     {
+#       "index": 0,
+#       "message": {
+#         "role": "assistant",
+#         "content": "```python\ndef add(a, b):\n    return a + b\n```"
+#       },
+#       "finish_reason": "stop"
+#     }
+#   ],
+#   "usage": {
+#     "prompt_tokens": 125,
+#     "completion_tokens": 42,
+#     "total_tokens": 167
+#   }
+# }
+
 import time
 from typing import Any
 import httpx
 
 from src.core.exceptions import AgentSmithException, LLMQuotaExhaustedError
-from src.llm.base import BaseLLMClient, LLMResponse
+from src.llm.base import LLMResponse
 
 
-class OpenAICompatibleClient(BaseLLMClient):
+class OpenAICompatibleClient:
     """Client for LLM providers implementing the OpenAI chat completion API."""
 
     def __init__(self, model_name: str, base_url: str, api_key: str) -> None:
         """Initialize the client with model identifier and credentials.
 
         Args:
-            model_name: Target model identifier (e.g. 'llama-3.1-8b-instant').
+            model_name: Target model identifier (e.g. 'qwen/qwen3.8-27b').
             base_url: Provider base endpoint (e.g. 'https://api.groq.com').
             api_key: Secret API token for authentication.
         """
-        super().__init__(
-            model_name=model_name,
-            base_url=base_url,
-            api_key=api_key,
-        )
+        self.model_name = model_name
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self._client = httpx.AsyncClient(timeout=60.0)
 
     async def generate(
         self,
@@ -80,12 +102,11 @@ class OpenAICompatibleClient(BaseLLMClient):
         start_time: float = time.perf_counter()
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    url=url,
-                    headers=headers,
-                    json=payload,
-                )
+            response = await self._client.post(
+                url=url,
+                headers=headers,
+                json=payload,
+            )
         except httpx.TimeoutException as err:
             raise AgentSmithException(
                 f"Request to {self.model_name} timed out after 60s: {err}"
@@ -108,7 +129,12 @@ class OpenAICompatibleClient(BaseLLMClient):
         request_time_ms = (time.perf_counter() - start_time) * 1000
         response_data = response.json()
 
-        text = response_data["choices"][0]["message"]["content"]
+        choice_msg = response_data["choices"][0]["message"]
+        text = (
+            choice_msg.get("content")
+            or choice_msg.get("reasoning_content")
+            or ""
+        )
         usage = response_data.get("usage", {})
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
@@ -121,3 +147,7 @@ class OpenAICompatibleClient(BaseLLMClient):
             api_url=self.base_url,
             model_name=self.model_name,
         )
+
+    async def aclose(self) -> None:
+        """Close the underlying HTTP client and release its connections."""
+        await self._client.aclose()

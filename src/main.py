@@ -3,35 +3,49 @@
 import asyncio
 import os
 from dotenv import load_dotenv
+from src.core.exceptions import AgentSmithException
+from src.core.logger import get_logger
 
 from src.llm.openai_compatible import OpenAICompatibleClient
 
 load_dotenv()
+logger = get_logger(__name__)
 
 
-async def test_llm():
-    keys_str = os.getenv("GROCK_API_KEYS", "")
+async def test_llm() -> None:
+    keys_str = os.getenv("NVIDIA_API_KEYS", "")
     api_key = keys_str.split(",")[0].strip().strip('"')
 
     client = OpenAICompatibleClient(
-        model_name="openai/gpt-oss-120b",
-        base_url="https://api.groq.com/openai/v1",
+        model_name="nvidia/nemotron-3.5-bolt-e4b",
+        base_url="https://integrate.api.nvidia.com/v1",
         api_key=api_key,
     )
 
     messages = [
         {
             "role": "user",
-            "content": "Écris une fonction Python simple qui additionne deux nombres."
+            "content": (
+                "Écris une fonction Python simple qui additionne deux nombres."
+            )
         }
     ]
 
-    print("Request s...")
-    response = await client.generate(messages)
+    try:
+        print("Request s...")
+        response = await client.generate(messages)
+    except AgentSmithException as err:
+        logger.error(f"LLM request failed: {err}")
+        return
+    finally:
+        await client.aclose()
 
     print("Model name:", response.model_name)
     print("Response time :", f"{response.request_time_ms:.1f} ms")
-    print("Token:", f"Input: {response.input_tokens} | Output: {response.output_tokens}")
+    print(
+        "Token:",
+        f"Input: {response.input_tokens} | Output: {response.output_tokens}",
+    )
     print("URL:", response.api_url)
     print("\n--- Generated content ---")
     print(response.text)
@@ -39,6 +53,7 @@ async def test_llm():
 
 if __name__ == "__main__":
     asyncio.run(test_llm())
+
 
 # import sys
 # from src.core.logger import get_logger
