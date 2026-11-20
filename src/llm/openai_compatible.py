@@ -42,7 +42,7 @@ from typing import Any
 import httpx
 
 from src.core.exceptions import AgentSmithException, LLMQuotaExhaustedError
-from src.llm.base import LLMResponse
+from src.llm.llmresponse_model import LLMResponse
 
 
 class OpenAICompatibleClient:
@@ -55,6 +55,7 @@ class OpenAICompatibleClient:
             model_name: Target model identifier (e.g. 'qwen/qwen3.8-27b').
             base_url: Provider base endpoint (e.g. 'https://api.groq.com').
             api_key: Secret API token for authentication.
+            _client: Connection manager.
         """
         self.model_name = model_name
         self.base_url = base_url.rstrip("/")

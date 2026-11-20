@@ -1,9 +1,12 @@
 """Unit tests for code extraction from raw LLM output."""
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from src.core.exceptions import CodeExtractionError
 from src.core.extraction import (
+    build_tool_call,
     BaseExtractor,
     CodeExtractionResult,
     CodeExtractor,
@@ -26,7 +29,6 @@ def test_markdown_simple_block() -> None:
 
     assert result is not None
     assert result.code.strip() == "print('hi')"
-    assert result.thought == ""
     assert result.source_format == "markdown"
     assert result.truncated is False
 
@@ -48,15 +50,6 @@ def test_markdown_multiline_code() -> None:
     assert result.code.strip() == "def add(a, b):\n    return a + b"
 
 
-def test_markdown_thought_is_text_before_block() -> None:
-    """The text before the block becomes the 'thought', stripped."""
-    text = "I will add two numbers.\n\n```python\nx = 1 + 2\n```"
-    result = MarkdownExtractor().extract(text)
-
-    assert result is not None
-    assert result.thought == "I will add two numbers."
-    assert result.code.strip() == "x = 1 + 2"
-
 
 def test_markdown_truncated_block() -> None:
     """An opening fence with no closing fence yields a non-empty warning."""
@@ -67,7 +60,6 @@ def test_markdown_truncated_block() -> None:
     assert result.truncated is True
     assert "x = 1" in result.code
     assert "y = 2" in result.code
-    assert result.thought == "Let me try."
 
 
 def test_markdown_end_code_marker_is_removed() -> None:
@@ -143,13 +135,12 @@ def test_markdown_empty_block() -> None:
     assert result.truncated is False
 
 
-def test_markdown_truncated_without_thought() -> None:
-    """A truncated block at the very start has an empty thought."""
+def test_markdown_truncated_at_start() -> None:
+    """A truncated block at the very start is still extracted."""
     result = MarkdownExtractor().extract("```python\nx = 1")
 
     assert result is not None
     assert result.truncated is True
-    assert result.thought == ""
     assert result.code == "x = 1"
 
 
@@ -202,7 +193,6 @@ def test_xml_single_parameter() -> None:
     assert result.code == "result = read_file(filepath='main.py')"
     assert result.source_format == "xml"
     assert result.truncated is False
-    assert result.thought == ""
 
 
 def test_xml_several_parameters() -> None:
@@ -227,8 +217,8 @@ def test_xml_no_parameter() -> None:
     assert result.code == "result = list_files()"
 
 
-def test_xml_wrapped_in_function_calls_with_thought() -> None:
-    """The <function_calls> wrapper is dropped from the thought."""
+def test_xml_wrapped_in_function_calls() -> None:
+    """The <function_calls> wrapper does not prevent extraction."""
     text = (
         "I will read the file.\n"
         "<function_calls>\n"
@@ -240,7 +230,6 @@ def test_xml_wrapped_in_function_calls_with_thought() -> None:
     result = XMLExtractor().extract(text)
 
     assert result is not None
-    assert result.thought == "I will read the file."
     assert result.code == "result = read_file(filepath='main.py')"
 
 
@@ -329,7 +318,6 @@ def test_json_simple_call() -> None:
     assert result.code == "result = read_file(filepath='main.py')"
     assert result.source_format == "json"
     assert result.truncated is False
-    assert result.thought == ""
 
 
 def test_json_several_arguments() -> None:
@@ -382,8 +370,8 @@ def test_json_value_types_are_preserved() -> None:
     }
 
 
-def test_json_multiline_payload_and_thought() -> None:
-    """JSON spread over several lines works; text before is the thought."""
+def test_json_multiline_payload() -> None:
+    """JSON spread over several lines works."""
     text = (
         "I will read the file.\n"
         "<tool_call>\n"
@@ -396,7 +384,6 @@ def test_json_multiline_payload_and_thought() -> None:
     result = JSONExtractor().extract(text)
 
     assert result is not None
-    assert result.thought == "I will read the file."
     assert result.code == "result = read_file(filepath='main.py')"
 
 
@@ -441,7 +428,7 @@ def test_json_unclosed_tool_call_returns_none() -> None:
 
 def test_json_invalid_json_raises() -> None:
     """Malformed JSON inside the tag gives an explicit error."""
-    with pytest.raises(CodeExtractionError, match="json"):
+    with pytest.raises(CodeExtractionError, match="Invalid JSON"):
         JSONExtractor().extract(_tool_call('{"name": "read_file", '))
 
 
@@ -498,30 +485,7 @@ def test_react_simple_call() -> None:
     assert result.truncated is False
 
 
-def test_react_thought_prefix_is_removed() -> None:
-    """The 'Thought:' label is not part of the thought."""
-    text = "Thought: I need to read the file.\nAction: read_file\n"
-    result = ReActExtractor().extract(text)
 
-    assert result is not None
-    assert result.thought == "I need to read the file."
-
-
-def test_react_thought_without_prefix_is_kept() -> None:
-    """Free text before the action is the thought."""
-    text = "Let me look.\nAction: list_files\n"
-    result = ReActExtractor().extract(text)
-
-    assert result is not None
-    assert result.thought == "Let me look."
-
-
-def test_react_no_thought() -> None:
-    """An action at the very start has an empty thought."""
-    result = ReActExtractor().extract("Action: list_files")
-
-    assert result is not None
-    assert result.thought == ""
 
 
 def test_react_several_arguments() -> None:
@@ -715,12 +679,36 @@ def test_dispatcher_raises_when_nothing_matches() -> None:
         extractor.extract("no code here")
 
 
-def test_dispatcher_error_message_contains_response_excerpt() -> None:
-    """The error shows the start of the response to ease debugging."""
+def test_dispatcher_error_message_does_not_echo_response() -> None:
+    """The LLM knows what it wrote: echoing it would waste input tokens."""
     extractor = CodeExtractor([_StubExtractor(None)])
 
-    with pytest.raises(CodeExtractionError, match="hello world"):
+    with pytest.raises(CodeExtractionError) as exc_info:
         extractor.extract("hello world")
+
+    assert "hello world" not in exc_info.value.message
+
+
+def test_dispatcher_logs_response_excerpt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The start of the response goes to the logs for debugging."""
+    fake_logger = MagicMock()
+    monkeypatch.setattr("src.core.extraction.logger", fake_logger)
+    extractor = CodeExtractor([_StubExtractor(None)])
+
+    with pytest.raises(CodeExtractionError):
+        extractor.extract("hello world")
+
+    assert "hello world" in fake_logger.warning.call_args.args[0]
+
+
+def test_dispatcher_error_message_says_nothing_was_executed() -> None:
+    """The LLM is told explicitly that nothing ran."""
+    extractor = CodeExtractor([_StubExtractor(None)])
+
+    with pytest.raises(CodeExtractionError, match="nothing was executed"):
+        extractor.extract("no code here")
 
 
 def test_dispatcher_error_message_explains_expected_format() -> None:
@@ -731,15 +719,16 @@ def test_dispatcher_error_message_explains_expected_format() -> None:
         extractor.extract("no code here")
 
 
-def test_dispatcher_error_message_truncates_long_response() -> None:
-    """Only the start of a long response is echoed back."""
+def test_dispatcher_error_message_has_constant_size() -> None:
+    """The message size does not depend on the length of the response."""
     extractor = CodeExtractor([_StubExtractor(None)])
+    messages = []
+    for text in ("a", "b" * 5000):
+        with pytest.raises(CodeExtractionError) as exc_info:
+            extractor.extract(text)
+        messages.append(exc_info.value.message)
 
-    with pytest.raises(CodeExtractionError) as exc_info:
-        extractor.extract("a" * 150 + "b" * 500)
-
-    assert "b" * 50 in exc_info.value.message
-    assert "b" * 51 not in exc_info.value.message
+    assert messages[0] == messages[1]
 
 
 def test_dispatcher_empty_list_is_respected() -> None:
@@ -754,7 +743,6 @@ def test_dispatcher_default_handles_markdown() -> None:
 
     assert result.source_format == "markdown"
     assert result.code.strip() == "x = 1"
-    assert result.thought == "Plan."
 
 
 
@@ -770,3 +758,224 @@ def test_feedback_explains_unclosed_block() -> None:
     message = result.feedback()
     assert "no closing" in message
     assert "<end_code>" in message
+
+
+@pytest.mark.parametrize("tag", ["py", "python3", "Python", "PY"])
+def test_markdown_python_tag_variants_closed(tag: str) -> None:
+    """py / python3 (any case) are accepted as Python blocks."""
+    result = MarkdownExtractor().extract(f"```{tag}\nx = 1\n```")
+
+    assert result is not None
+    assert result.code.strip() == "x = 1"
+    assert result.truncated is False
+
+
+@pytest.mark.parametrize("tag", ["py", "python3"])
+def test_markdown_python_tag_variants_unclosed(tag: str) -> None:
+    """An unclosed py / python3 block is recovered and flagged."""
+    result = MarkdownExtractor().extract(f"```{tag}\nx = 1")
+
+    assert result is not None
+    assert result.code == "x = 1"
+    assert result.truncated is True
+
+
+@pytest.mark.parametrize("tag", ["bash", "json", "pycon", "python2"])
+def test_markdown_other_language_tags_still_ignored(tag: str) -> None:
+    """Non-Python tags (even similar ones) are not executed."""
+    assert MarkdownExtractor().extract(f"```{tag}\nx = 1\n```") is None
+    assert MarkdownExtractor().extract(f"```{tag}\nx = 1") is None
+
+
+# --------------------------------------------------------------------------
+# Ignored blocks / tool calls
+# --------------------------------------------------------------------------
+
+
+def test_markdown_two_blocks_first_used_second_ignored() -> None:
+    """Only the first python block is executed; the other is counted."""
+    text = "```python\nx = 1\n```\nthen\n```python\ny = 2\n```"
+    result = MarkdownExtractor().extract(text)
+
+    assert result is not None
+    assert result.code.strip() == "x = 1"
+    assert result.ignored_blocks == 1
+
+
+def test_markdown_three_blocks_counts_two_ignored() -> None:
+    """Every extra python block is counted."""
+    block = "```python\nx = 1\n```\n"
+    result = MarkdownExtractor().extract(block * 3)
+
+    assert result is not None
+    assert result.ignored_blocks == 2
+
+
+def test_markdown_single_block_ignores_nothing() -> None:
+    """One block means nothing ignored and no feedback."""
+    result = CodeExtractor().extract("```python\nx = 1\n```")
+
+    assert result.ignored_blocks == 0
+    assert result.feedback() == ""
+
+
+def test_markdown_other_language_blocks_not_counted() -> None:
+    """A bash block between python blocks is not a python block."""
+    text = "```python\nx = 1\n```\n```bash\nls\n```"
+    result = MarkdownExtractor().extract(text)
+
+    assert result is not None
+    assert result.ignored_blocks == 0
+
+
+def test_markdown_later_unclosed_block_counted() -> None:
+    """A closed block followed by an unclosed one: the latter is ignored."""
+    text = "```python\nx = 1\n```\n```python\ny = 2"
+    result = MarkdownExtractor().extract(text)
+
+    assert result is not None
+    assert result.code.strip() == "x = 1"
+    assert result.ignored_blocks == 1
+
+
+def test_xml_two_invokes_second_ignored() -> None:
+    """Only the first <invoke> is converted; the other is counted."""
+    text = (
+        '<invoke name="a"></invoke>\n'
+        '<invoke name="b"></invoke>'
+    )
+    result = XMLExtractor().extract(text)
+
+    assert result is not None
+    assert result.code == "result = a()"
+    assert result.ignored_blocks == 1
+
+
+def test_json_two_tool_calls_second_ignored() -> None:
+    """Only the first <tool_call> is converted; the other is counted."""
+    text = (
+        '<tool_call>{"name": "a"}</tool_call>\n'
+        '<tool_call>{"name": "b"}</tool_call>'
+    )
+    result = JSONExtractor().extract(text)
+
+    assert result is not None
+    assert result.code == "result = a()"
+    assert result.ignored_blocks == 1
+
+
+def test_react_two_actions_second_ignored() -> None:
+    """Only the first Action is converted; the other is counted."""
+    text = "Action: a\nObservation: fake\nAction: b\n"
+    result = ReActExtractor().extract(text)
+
+    assert result is not None
+    assert result.code == "result = a()"
+    assert result.ignored_blocks == 1
+
+
+@pytest.mark.parametrize("extractor,text", [
+    (XMLExtractor(), '<invoke name="a"></invoke>'),
+    (JSONExtractor(), '<tool_call>{"name": "a"}</tool_call>'),
+    (ReActExtractor(), "Action: a"),
+])
+def test_single_tool_call_ignores_nothing(
+    extractor: BaseExtractor, text: str
+) -> None:
+    """One tool call means nothing ignored and no feedback."""
+    result = extractor.extract(text)
+
+    assert result is not None
+    assert result.ignored_blocks == 0
+    assert result.feedback() == ""
+
+
+def test_feedback_mentions_ignored_code_blocks() -> None:
+    """Markdown feedback speaks of code blocks and asks for exactly one."""
+    result = CodeExtractor().extract(
+        "```python\nx = 1\n```\n```python\ny = 2\n```")
+    message = result.feedback()
+
+    assert "first code block" in message
+    assert "1 other code block(s)" in message
+    assert "exactly one code block" in message
+
+
+def test_feedback_mentions_ignored_tool_calls() -> None:
+    """Tool-call formats speak of tool calls, not code blocks."""
+    result = CodeExtractor().extract("Action: a\nAction: b\n")
+    message = result.feedback()
+
+    assert "first tool call" in message
+    assert "code block" not in message
+
+
+def test_feedback_combines_truncated_and_ignored() -> None:
+    """Both issues are reported, one line each."""
+    result = CodeExtractionResult(
+        code="x = 1", source_format="markdown",
+        truncated=True, ignored_blocks=2)
+    lines = result.feedback().splitlines()
+
+    assert len(lines) == 2
+    assert "no closing" in lines[0]
+    assert "2 other code block(s)" in lines[1]
+
+
+# --------------------------------------------------------------------------
+# Error messages (feedback for the LLM)
+# --------------------------------------------------------------------------
+
+
+def test_invalid_tool_name_message_names_the_tool() -> None:
+    """A bad tool name is reported as such, with the rule to follow."""
+    with pytest.raises(CodeExtractionError) as exc_info:
+        build_tool_call("read-file", {})
+
+    message = exc_info.value.message
+    assert "Invalid tool name 'read-file'" in message
+    assert "valid Python identifier" in message
+    assert "not executed" in message
+
+
+def test_invalid_argument_name_message_names_the_argument() -> None:
+    """A bad argument is not blamed on the (valid) tool name."""
+    with pytest.raises(CodeExtractionError) as exc_info:
+        build_tool_call("read_file", {"file-path": "a.py"})
+
+    message = exc_info.value.message
+    assert "Invalid argument name 'file-path'" in message
+    assert "tool 'read_file'" in message
+    assert "Invalid tool name" not in message
+
+
+@pytest.mark.parametrize("text", [
+    _tool_call('{"name": "read_file", '),
+    _tool_call('["read_file"]'),
+    _tool_call('{"arguments": {"a": 1}}'),
+    _tool_call('{"name": 123}'),
+    _tool_call('{"name": "t", "arguments": ["a"]}'),
+])
+def test_json_errors_follow_the_convention(text: str) -> None:
+    """Every JSON error says the call was not run and shows the format."""
+    with pytest.raises(CodeExtractionError) as exc_info:
+        JSONExtractor().extract(text)
+
+    message = exc_info.value.message
+    assert "Your tool call was not executed." in message
+    assert '<tool_call>{"name": "read_file"' in message
+
+
+@pytest.mark.parametrize("text", [
+    'Action: read_file\nAction Input: {"filepath": "ma',
+    "Action: read_file\nAction Input: main.py",
+    "Action: tool\nAction Input: [1]",
+])
+def test_react_errors_follow_the_convention(text: str) -> None:
+    """Every ReAct error says the action was not run and shows the format."""
+    with pytest.raises(CodeExtractionError) as exc_info:
+        ReActExtractor().extract(text)
+
+    message = exc_info.value.message
+    assert "Your action was not executed." in message
+    assert "Action Input:" in message

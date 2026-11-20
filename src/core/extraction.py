@@ -3,9 +3,20 @@
 from abc import ABC, abstractmethod
 from typing import Any, Literal
 from src.core.exceptions import CodeExtractionError
+from src.core.logger import get_logger
 from pydantic import BaseModel, Field
 import re
 import json
+
+logger = get_logger(__name__)
+
+# Error messages are sent back to the LLM as observations. Convention:
+# "<what is wrong>. Your <format> was not executed. Expected: <example>."
+_JSON_EXAMPLE = (
+    '<tool_call>{"name": "read_file", "arguments": {"filepath": "a.py"}}'
+    "</tool_call>"
+)
+_REACT_EXAMPLE = 'Action: read_file\nAction Input: {"filepath": "a.py"}'
 
 
 def build_tool_call(name: str, arguments: dict[str, Any]) -> str:
@@ -38,9 +49,16 @@ def build_tool_call(name: str, arguments: dict[str, Any]) -> str:
         CodeExtractionError: If ``name`` or an argument key is not a valid
             Python identifier, which would not produce a single valid call.
     """
-    if not name.isidentifier() or not all(k.isidentifier() for k in arguments):
-        raise CodeExtractionError(f"Invalid tool name or argument: {name!r}")
-    args: str = ""
+    if not name.isidentifier():
+        raise CodeExtractionError(
+            f"Invalid tool name {name!r}: it must be a valid Python "
+            "identifier. Your tool call was not executed.")
+    for key in arguments:
+        if not key.isidentifier():
+            raise CodeExtractionError(
+                f"Invalid argument name {key!r} for tool {name!r}: it must "
+                "be a valid Python identifier. Your tool call was not "
+                "executed.")
     args = ", ".join(
         f"{key}={repr(value)}" for key, value in arguments.items())
     return f"result = {name}({args})"
@@ -48,7 +66,6 @@ def build_tool_call(name: str, arguments: dict[str, Any]) -> str:
 
 class CodeExtractionResult(BaseModel):
     code: str = Field(..., description="Code to execute")
-    thought: str = Field(default="", description="Text before the code")
     source_format: Literal["markdown", "xml", "json", "react"] = Field(
         ..., description="Detected format of the LLM response"
     )
@@ -56,27 +73,43 @@ class CodeExtractionResult(BaseModel):
         default=False,
         description="True if the code block had no closing fence",
     )
+    ignored_blocks: int = Field(
+        default=0,
+        description="Extra code blocks or tool calls that were not executed",
+    )
 
     def feedback(self) -> str:
         """Build the message telling the LLM how its response was read.
 
-        The subject requires explicit feedback when a code block was
-        malformed but interpreted anyway, so the LLM is never left guessing.
-        The agent loop should add this message to the observation sent back
-        to the LLM.
+        The subject requires explicit feedback when a response was malformed
+        but interpreted anyway, so the LLM is never left guessing. The agent
+        loop should add this message to the observation sent back to the LLM.
 
         Returns:
-            An explanation if the code block had no closing fence, or an
-            empty string if the response was well-formed.
+            One line per issue found (missing closing fence, extra blocks or
+            tool calls ignored), or an empty string if the response was
+            well-formed.
         """
-        if not self.truncated:
-            return ""
-        return (
-            "Warning: your code block had no closing ``` fence. It was "
-            "interpreted anyway, from the opening fence up to <end_code> "
-            "or the end of your response. Always close your code block "
-            "with ``` before <end_code>."
-        )
+        messages: list[str] = []
+        if self.truncated:
+            messages.append(
+                "Warning: your code block had no closing ``` fence. It was "
+                "interpreted anyway, from the opening fence up to "
+                "<end_code> or the end of your response. Always close your "
+                "code block with ``` before <end_code>."
+            )
+        if self.ignored_blocks:
+            unit = (
+                "code block" if self.source_format == "markdown"
+                else "tool call"
+            )
+            messages.append(
+                f"Warning: only your first {unit} was executed; "
+                f"{self.ignored_blocks} other {unit}(s) were ignored. "
+                f"Write exactly one {unit} per response, then wait for "
+                "the observation."
+            )
+        return "\n".join(messages)
 
 
 class BaseExtractor(ABC):
@@ -94,7 +127,12 @@ class MarkdownExtractor(BaseExtractor):
     # Blocks are read sequentially, so the closing fence of a block is never
     # read as the opening fence of the next one.
     _BLOCK = re.compile(r"```([^\n]*)\n(.*?)```", re.DOTALL)
-    _OPENING = re.compile(r"```(?:python)?[ \t]*\n", re.IGNORECASE)
+    # Language tags accepted as Python (an empty tag is a bare fence).
+    _PYTHON_TAGS = ("", "python", "py", "python3")
+    _OPENING = re.compile(
+        r"```(?:" + "|".join(t for t in _PYTHON_TAGS if t) + r")?[ \t]*\n",
+        re.IGNORECASE,
+    )
     _END_CODE = "<end_code>"
 
     def extract(self, text: str) -> CodeExtractionResult | None:
@@ -104,12 +142,15 @@ class MarkdownExtractor(BaseExtractor):
         # Skip blocks of other languages (bash, json, ...).
         python_blocks = [
             b for b in blocks
-            if b.group(1).strip().lower() in ("", "python")]
+            if b.group(1).strip().lower() in self._PYTHON_TAGS]
 
         if python_blocks:
-            result = python_blocks[0]
-            code = result.group(2)
+            code = python_blocks[0].group(2)
             truncated = False
+            ignored = len(python_blocks) - 1
+            # A later unclosed python fence is one more ignored block.
+            if self._OPENING.search(text, python_blocks[-1].end()):
+                ignored += 1
         else:
             # No closed python block: look for an unclosed opening fence,
             # after the blocks already read (their closing fences excluded).
@@ -117,18 +158,16 @@ class MarkdownExtractor(BaseExtractor):
             new_block_opening = self._OPENING.search(text, last_block_end)
             if not new_block_opening:
                 return None
-            result = new_block_opening
             # The model may have written <end_code> without closing the fence.
             code = text[new_block_opening.end():].split(self._END_CODE)[0]
             truncated = True
-
-        thought = text[:result.start()].strip()
+            ignored = 0
 
         code_result = CodeExtractionResult(
             code=code,
-            thought=thought,
             source_format="markdown",
             truncated=truncated,
+            ignored_blocks=ignored,
         )
 
         return code_result
@@ -155,13 +194,11 @@ class XMLExtractor(BaseExtractor):
         parameters = dict(self._PARAMETER.findall(match.group(2)))
 
         code = build_tool_call(name, parameters)
-        raw_thought = text[:match.start()]
-        thought = raw_thought.split("<function_calls>")[0].strip()
 
         code_extracted = CodeExtractionResult(
             code=code,
-            thought=thought,
             source_format="xml",
+            ignored_blocks=len(self._INVOKE.findall(text)) - 1,
         )
 
         return code_extracted
@@ -176,6 +213,13 @@ class JSONExtractor(BaseExtractor):
 
     _TOOL_CALL = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
 
+    @staticmethod
+    def _error(detail: str) -> CodeExtractionError:
+        """Build an error following the LLM feedback convention."""
+        return CodeExtractionError(
+            f"{detail} Your tool call was not executed. "
+            f"Expected: {_JSON_EXAMPLE}")
+
     def extract(self, text: str) -> CodeExtractionResult | None:
         match = self._TOOL_CALL.search(text)
 
@@ -186,31 +230,32 @@ class JSONExtractor(BaseExtractor):
         try:
             call_tool_dict = json.loads(json_call_tool)
         except json.JSONDecodeError as e:
-            raise CodeExtractionError(
-                f"Invalid json in <tool_call>: {e}") from e
+            raise self._error(
+                f"Invalid JSON inside <tool_call>: {e}.") from e
 
         if not isinstance(call_tool_dict, dict):
-            raise CodeExtractionError("<tool_call> is not a dictionary")
+            raise self._error(
+                "The content of <tool_call> must be a JSON object.")
 
         if "name" not in call_tool_dict:
-            raise CodeExtractionError("No key 'name' in json call tool")
+            raise self._error("Missing key 'name' in <tool_call>.")
 
         name = call_tool_dict["name"]
         if not isinstance(name, str):
-            raise CodeExtractionError(
-                "The key 'name' in <tool_call> is not a string")
+            raise self._error(
+                "Key 'name' in <tool_call> must be a string.")
 
         arguments = call_tool_dict.get("arguments", {})
         if not isinstance(arguments, dict):
-            raise CodeExtractionError("Arguments are not a dictionnary")
+            raise self._error(
+                "Key 'arguments' in <tool_call> must be a JSON object.")
 
         code = build_tool_call(name, arguments)
-        thought = text[:match.start()].strip()
 
         code_extracted = CodeExtractionResult(
             code=code,
-            thought=thought,
             source_format="json",
+            ignored_blocks=len(self._TOOL_CALL.findall(text)) - 1,
         )
 
         return code_extracted
@@ -229,6 +274,13 @@ class ReActExtractor(BaseExtractor):
     _ACTION = re.compile(r"^Action:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
     _ACTION_INPUT = re.compile(r"^Action Input:[ \t]*", re.MULTILINE)
 
+    @staticmethod
+    def _error(detail: str) -> CodeExtractionError:
+        """Build an error following the LLM feedback convention."""
+        return CodeExtractionError(
+            f"{detail} Your action was not executed. "
+            f"Expected:\n{_REACT_EXAMPLE}")
+
     def extract(self, text: str) -> CodeExtractionResult | None:
         match = self._ACTION.search(text)
         if not match:
@@ -245,20 +297,19 @@ class ReActExtractor(BaseExtractor):
                 data, _ = json.JSONDecoder().raw_decode(
                     text[match_arguments_key.end():].lstrip())
             except json.JSONDecodeError as e:
-                raise CodeExtractionError(
-                    f"Invalid json in 'Action Input': {e}") from e
+                raise self._error(
+                    f"Invalid JSON in 'Action Input': {e}.") from e
             if not isinstance(data, dict):
-                raise CodeExtractionError(
-                    "Value of 'Action Input' is not a dictionary")
+                raise self._error(
+                    "'Action Input' must be a JSON object.")
             arguments = data
 
         code = build_tool_call(name, arguments)
-        thought = text[:match.start()].strip().removeprefix("Thought:").strip()
 
         code_extracted = CodeExtractionResult(
             code=code,
-            thought=thought,
             source_format="react",
+            ignored_blocks=len(self._ACTION.findall(text)) - 1,
         )
 
         return code_extracted
@@ -287,10 +338,12 @@ class CodeExtractor:
             result = extractor.extract(text)
             if result is not None:
                 return result
+        # The excerpt helps debugging but the LLM already knows what it
+        # wrote: keep it in the logs, not in the (token-limited) message.
+        logger.warning(f"No code found. Response starts with: {text[:200]!r}")
         # This message is sent back to the LLM as an observation: it must
         # tell the model how to fix its next answer.
         raise CodeExtractionError(
-            "No executable code found in your response. Write your "
-            "reasoning, then exactly one Python code block:\n"
-            "```python\n# your code\n```\n"
-            f"Start of your response: {text[:200]!r}")
+            "No executable code found in your response, so nothing was "
+            "executed. Write your reasoning, then exactly one Python code "
+            "block:\n```python\n# your code\n```")
