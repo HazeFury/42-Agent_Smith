@@ -15,5 +15,6 @@ wheels/
 documentation/*subject.pdf
 moulinette/
 .antigravity/
+.claude/
 
 .env

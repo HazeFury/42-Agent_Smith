@@ -127,7 +127,7 @@ Ce document définit l'architecture logicielle complète du projet **Agent Smith
 * **Rôle** : Moteur agnostique de la boucle **Thought → Code → Observation**.
 * **Classes & Méthodes** :
   * `class AgentLoop`:
-    * `__init__(llm_client: BaseLLMClient, sandbox_runner: SandboxRunner, prompt_manager: PromptManager, extractor: CodeExtractor, max_iterations: int, max_input_tokens: int, max_output_tokens: int, timeout_seconds: int)` : Injection de dépendances complète.
+    * `__init__(llm_client: OpenAICompatibleClient, sandbox_runner: SandboxRunner, prompt_manager: PromptManager, extractor: CodeExtractor, max_iterations: int, max_input_tokens: int, max_output_tokens: int, timeout_seconds: int)` : Injection de dépendances complète.
     * `run(task_id: str, benchmark: str, user_prompt: str, tool_manual: str) -> SolutionOutput` : Déroule la boucle de raisonnement, vérifie les seuils durs, capture `final_answer()` et enregistre les `StepMetrics`.
     * `_enforce_hard_limits(iteration: int, cumulative_in: int, cumulative_out: int, elapsed_time: float) -> None` : Valide les limites dures du benchmark.
 
@@ -141,7 +141,7 @@ Ce document définit l'architecture logicielle complète du projet **Agent Smith
   * `class MBPPAgent`:
     * `__init__(task_file: Path, output_file: Path, model_name: str, provider_url: str, max_iterations: int = 10)`
     * `load_task() -> MBPPTaskInput` : Charge et valide le JSON d'entrée.
-    * `bootstrap_environment() -> tuple[SandboxRunner, BaseLLMClient, str]` : Configure le serveur MCP MBPP local, connecte le client MCP, prépare le namespace sandbox et génère le manuel d'outils.
+    * `bootstrap_environment() -> tuple[SandboxRunner, OpenAICompatibleClient, str]` : Configure le serveur MCP MBPP local, connecte le client MCP, prépare le namespace sandbox et génère le manuel d'outils.
     * `solve() -> SolutionOutput` : Exécute `AgentLoop` avec les limites MBPP (10 iters, 120s, 6k in, 1.5k out).
     * `save_solution(solution: SolutionOutput) -> None` : Sauvegarde le fichier `solution.json`.
 
@@ -151,7 +151,7 @@ Ce document définit l'architecture logicielle complète du projet **Agent Smith
   * `class SWEBenchAgent`:
     * `__init__(task_file: Path, output_file: Path, model_name: str, provider_url: str, max_iterations: int = 30)`
     * `load_task() -> SWEBenchTaskInput` : Charge la tâche SWE-bench.
-    * `bootstrap_environment() -> tuple[SandboxRunner, BaseLLMClient, str]` : Initialise le conteneur Docker via `DockerManager`, démarre le serveur MCP SWE-bench et prépare la sandbox.
+    * `bootstrap_environment() -> tuple[SandboxRunner, OpenAICompatibleClient, str]` : Initialise le conteneur Docker via `DockerManager`, démarre le serveur MCP SWE-bench et prépare la sandbox.
     * `solve() -> SolutionOutput` : Exécute `AgentLoop` avec les limites SWE-bench (30 iters, 900s, 300k in, 10k out).
     * `save_solution(solution: SolutionOutput) -> None` : Sauvegarde le fichier `solution.json` avec le git patch dans le champ `solution`.
 
@@ -240,24 +240,16 @@ Chaque verrou de sécurité est séparé dans un module dédié (principe SRP) p
 ## 7. Package `src/llm/` (Abstraction LLM, Rotation & Métrologie)
 
 ### `src/llm/base.py`
-* **Rôle** : Contrat d'interface et modèle de réponse commun.
+* **Rôle** : Modèle de réponse commun (pas de classe abstraite : tous les providers suivent le standard OpenAI, un `Protocol` sera introduit si un client non compatible apparaît).
 * **Classes & Méthodes** :
   * `class LLMResponse(BaseModel)` : `text: str`, `input_tokens: int`, `output_tokens: int`, `latency_ms: float`, `model_name: str`, `api_url: str`.
-  * `class BaseLLMClient(ABC)` :
-    * `__init__(model_name: str, base_url: str, api_key: str)`
-    * `@abstractmethod async def generate(messages: list[dict], stop_sequences: Optional[list[str]] = None) -> LLMResponse`
 
 ### `src/llm/openai_compatible.py`
-* **Rôle** : Client générique pour tous les fournisseurs d'API compatibles OpenAI (Groq, OpenRouter, Mistral, Together AI).
+* **Rôle** : Client générique pour tous les fournisseurs d'API compatibles OpenAI (Groq, OpenRouter, Mistral, Together AI, Gemini via son endpoint OpenAI-compatible).
 * **Classes & Méthodes** :
-  * `class OpenAICompatibleClient(BaseLLMClient)`:
+  * `class OpenAICompatibleClient`:
+    * `__init__(model_name: str, base_url: str, api_key: str)`
     * `async generate(messages: list[dict], stop_sequences: Optional[list[str]] = None) -> LLMResponse` : Effectue la requête HTTP POST sur `{base_url}/chat/completions`, mesure la latence et extrait le décompte de tokens.
-
-### `src/llm/gemini.py`
-* **Rôle** : Client dédié pour Google AI Studio / Gemini API (*Section V.6.1*).
-* **Classes & Méthodes** :
-  * `class GeminiClient(BaseLLMClient)`:
-    * `async generate(messages: list[dict], stop_sequences: Optional[list[str]] = None) -> LLMResponse` : Appel via l'API REST Google Gemini ou le SDK officiel.
 
 ### `src/llm/key_manager.py`
 * **Rôle** : Gestion du pool de clés API, détection des erreurs 429 et rotation automatique (*Section V.6.1 & V.7*).
@@ -272,7 +264,7 @@ Chaque verrou de sécurité est séparé dans un module dédié (principe SRP) p
 * **Rôle** : Mesure du temps d'API (wall-clock ms), décompte précis des tokens d'entrée et de sortie, et gestion des retries avec backoff.
 * **Classes & Méthodes** :
   * `class TokenTracker`:
-    * `__init__(primary_client: BaseLLMClient, key_manager: KeyManager, fallback_clients: Optional[list[BaseLLMClient]] = None, max_retries: int = 3)`
+    * `__init__(primary_client: OpenAICompatibleClient, key_manager: KeyManager, fallback_clients: Optional[list[OpenAICompatibleClient]] = None, max_retries: int = 3)`
     * `async query(messages: list[dict], stop_sequences: Optional[list[str]] = None) -> tuple[LLMResponse, int]` : Mesure la latence, incrémente le compteur de retries, effectue la rotation de clé via `KeyManager` sur erreur 429, et bascule sur les clients de repli si nécessaire.
 
 ---
