@@ -17,3 +17,7 @@ externe :
 - cli.py            : Mode REPL interactif en ligne de commande pour la
                       commande 'uv run sandbox'.
 """
+
+from src.sandbox.core import SandboxRunner
+
+__all__ = ["SandboxRunner"]

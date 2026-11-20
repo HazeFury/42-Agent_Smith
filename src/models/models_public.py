@@ -6,6 +6,7 @@ Defines the JSON schema the moulinette expects in solution.json.
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Union
+
 from pydantic import BaseModel, Field
 
 
@@ -164,9 +165,8 @@ class SandboxConfig(BaseModel):
                 return True
             if pattern.endswith(".*"):
                 base_module = pattern[:-2]
-                if (
-                    module_name == base_module
-                    or module_name.startswith(f"{base_module}.")
+                if module_name == base_module or module_name.startswith(
+                    f"{base_module}."
                 ):
                     return True
         return False

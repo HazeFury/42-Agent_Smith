@@ -39,10 +39,11 @@ All providers share the exact same JSON request and response contract:
 
 import time
 from typing import Any
+
 import httpx
 
 from src.core.exceptions import AgentSmithException, LLMQuotaExhaustedError
-from src.llm.llmresponse_model import LLMResponse
+from src.models.models_private import LLMResponse
 
 
 class OpenAICompatibleClient:

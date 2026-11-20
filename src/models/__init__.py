@@ -8,6 +8,9 @@ Exports the official Pydantic models required for the moulinette evaluation:
 - SWEBenchTaskInput: task schema for SWE-bench Dockerized challenges.
 """
 
+from src.models.models_private import (
+    ExecutionResult,
+)
 from src.models.models_public import (
     MBPPTaskInput,
     SandboxConfig,
@@ -20,6 +23,7 @@ __all__ = [
     "StepMetrics",
     "SolutionOutput",
     "SandboxConfig",
+    "ExecutionResult",
     "MBPPTaskInput",
     "SWEBenchTaskInput",
 ]

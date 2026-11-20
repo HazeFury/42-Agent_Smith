@@ -50,3 +50,15 @@ class TokenLimitExceededError(AgentSmithException):
 
 class MaxIterationsReachedError(AgentSmithException):
     """Raised when the agent loop hits max_iterations without final_answer."""
+
+
+class FinalAnswerSignal(BaseException):
+    """Control-flow signal raised by the injected final_answer() callable.
+
+    Inherits directly from BaseException so that user/agent code catching
+    generic `except Exception:` cannot accidentally swallow this signal.
+    """
+
+    def __init__(self, answer: str) -> None:
+        super().__init__(answer)
+        self.answer = str(answer)
