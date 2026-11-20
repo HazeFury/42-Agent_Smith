@@ -1,0 +1,44 @@
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+
+class ExecutionResult(BaseModel):
+    """Result of code execution within the sandbox environment."""
+
+    stdout: str = Field(
+        default="",
+        description="Standard output produced during code execution",
+    )
+    stderr: str = Field(
+        default="",
+        description="Standard error produced during code execution",
+    )
+    output: str = Field(
+        default="",
+        description="Combined or formatted output visible to the agent/user",
+    )
+    success: bool = Field(
+        default=True,
+        description="Whether the code executed without uncaught exceptions",
+    )
+    is_final_answer: bool = Field(
+        default=False,
+        description="Whether final_answer() was called during this execution",
+    )
+    final_answer_value: Optional[str] = Field(
+        default=None,
+        description="Argument passed to final_answer() if invoked",
+    )
+    truncated: bool = Field(
+        default=False,
+        description="Whether output was truncated due to length limits",
+    )
+    execution_time_ms: float = Field(
+        default=0.0,
+        description="Wall-clock execution time in milliseconds",
+    )
+    error: Optional[str] = Field(
+        default=None,
+        description="Error message or exception traceback if execution failed",
+    )
