@@ -1,10 +1,10 @@
 """Extraction of executable Python code from raw LLM output."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Literal
+from typing import Any
 from src.core.exceptions import CodeExtractionError
 from src.core.logger import get_logger
-from pydantic import BaseModel, Field
+from src.models.models_private import CodeExtractionResult
 import re
 import json
 
@@ -62,54 +62,6 @@ def build_tool_call(name: str, arguments: dict[str, Any]) -> str:
     args = ", ".join(
         f"{key}={repr(value)}" for key, value in arguments.items())
     return f"result = {name}({args})"
-
-
-class CodeExtractionResult(BaseModel):
-    code: str = Field(..., description="Code to execute")
-    source_format: Literal["markdown", "xml", "json", "react"] = Field(
-        ..., description="Detected format of the LLM response"
-    )
-    truncated: bool = Field(
-        default=False,
-        description="True if the code block had no closing fence",
-    )
-    ignored_blocks: int = Field(
-        default=0,
-        description="Extra code blocks or tool calls that were not executed",
-    )
-
-    def feedback(self) -> str:
-        """Build the message telling the LLM how its response was read.
-
-        The subject requires explicit feedback when a response was malformed
-        but interpreted anyway, so the LLM is never left guessing. The agent
-        loop should add this message to the observation sent back to the LLM.
-
-        Returns:
-            One line per issue found (missing closing fence, extra blocks or
-            tool calls ignored), or an empty string if the response was
-            well-formed.
-        """
-        messages: list[str] = []
-        if self.truncated:
-            messages.append(
-                "Warning: your code block had no closing ``` fence. It was "
-                "interpreted anyway, from the opening fence up to "
-                "<end_code> or the end of your response. Always close your "
-                "code block with ``` before <end_code>."
-            )
-        if self.ignored_blocks:
-            unit = (
-                "code block" if self.source_format == "markdown"
-                else "tool call"
-            )
-            messages.append(
-                f"Warning: only your first {unit} was executed; "
-                f"{self.ignored_blocks} other {unit}(s) were ignored. "
-                f"Write exactly one {unit} per response, then wait for "
-                "the observation."
-            )
-        return "\n".join(messages)
 
 
 class BaseExtractor(ABC):

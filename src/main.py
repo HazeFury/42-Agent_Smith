@@ -4,55 +4,64 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from src.core.exceptions import AgentSmithException
+from src.core.extraction import CodeExtractor
 from src.core.logger import get_logger
-
+from src.core.loop import AgentLoop
+from src.core.prompt import PromptManager
 from src.llm.openai_compatible import OpenAICompatibleClient
+from src.models.models_public import SandboxConfig
+from src.sandbox import SandboxRunner
 
 load_dotenv()
 logger = get_logger(__name__)
 
+TASK_PROMPT = (
+    "Write a Python function `add(a, b)` that returns the sum of two "
+    "numbers. Submit it with final_answer."
+)
 
-async def test_llm() -> None:
-    keys_str = os.getenv("NVIDIA_API_KEYS", "")
+
+async def test_loop() -> None:
+    keys_str = os.getenv("GEMINI_API_KEYS", "")
     api_key = keys_str.split(",")[0].strip().strip('"')
 
-    client = OpenAICompatibleClient(
-        model_name="nvidia/nemotron-3.5-bolt-e4b",
-        base_url="https://integrate.api.nvidia.com/v1",
+    # The sandbox worker is a fork: create it before the HTTP client so it
+    # does not inherit open connections.
+    sandbox = SandboxRunner(SandboxConfig())
+    llm_client = OpenAICompatibleClient(
+        model_name="gemini-3.1-flash-lite",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
         api_key=api_key,
     )
-
-    messages = [
-        {
-            "role": "user",
-            "content": (
-                "Écris une fonction Python simple qui additionne deux nombres."
-            )
-        }
-    ]
+    agent = AgentLoop(llm_client, sandbox, CodeExtractor(), PromptManager())
 
     try:
-        print("Request s...")
-        response = await client.generate(messages)
+        print("Running the agent loop...")
+        output = await agent.run("test-1", "mbpp", TASK_PROMPT)
     except AgentSmithException as err:
-        logger.error(f"LLM request failed: {err}")
+        logger.error(f"Agent loop failed: {err}")
         return
     finally:
-        await client.aclose()
+        sandbox.close()
+        await llm_client.aclose()
 
-    print("Model name:", response.model_name)
-    print("Response time :", f"{response.request_time_ms:.1f} ms")
+    print(f"\nsuccess={output.success} iterations={output.iterations}")
     print(
-        "Token:",
-        f"Input: {response.input_tokens} | Output: {response.output_tokens}",
+        f"tokens: in={output.total_input_tokens} "
+        f"out={output.total_output_tokens} "
+        f"time={output.total_time_seconds:.1f}s"
     )
-    print("URL:", response.api_url)
-    print("\n--- Generated content ---")
-    print(response.text)
+    for step in output.steps:
+        print(f"\n--- step {step.step} ({step.model_name}) ---")
+        print("LLM output:\n", step.llm_output)
+        print("Sandbox input:\n", step.sandbox_input)
+        print("Sandbox output:\n", step.sandbox_output)
+    print("\n--- solution ---")
+    print(output.solution)
 
 
 if __name__ == "__main__":
-    asyncio.run(test_llm())
+    asyncio.run(test_loop())
 
 
 # import sys
